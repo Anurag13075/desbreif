@@ -64,27 +64,37 @@ Return strict, valid JSON with this exact structure:
   }
 }`;
 
+// Valid active models (excludes deprecated llama3-70b-8192, mixtral, etc.)
+const ACTIVE_GROQ_MODELS = [
+  "llama-3.3-70b-versatile",
+  "llama-3.1-8b-instant",
+  "gemma2-9b-it",
+];
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { transcript, apiKey: clientApiKey, model = "llama-3.3-70b-versatile", speakerName = "Anurag Sharma" } = body;
+    const { transcript, apiKey: clientApiKey, model: clientModel, speakerName = "Anurag Sharma" } = body;
 
     if (!transcript || typeof transcript !== "string" || !transcript.trim()) {
       return NextResponse.json({ error: "Empty transcript provided" }, { status: 400 });
     }
 
     // Resolve API key from server environment OR client override
-    const apiKey =
+    const rawKey =
       process.env.GROQ_API_KEY ||
       process.env.NEXT_PUBLIC_GROQ_API_KEY ||
+      process.env.GROK_API_KEY ||
+      process.env.XAI_API_KEY ||
       clientApiKey ||
       "";
 
-    if (!apiKey || !apiKey.startsWith("gsk_")) {
-      // Return error or inform that Groq API key is missing
+    const apiKey = rawKey.trim();
+
+    if (!apiKey) {
       return NextResponse.json(
         {
-          error: "Missing Groq API Key",
+          error: "Missing API Key",
           message: "Please configure GROQ_API_KEY in Vercel or click Connect Groq in the top navbar.",
           needsKey: true,
         },
@@ -92,15 +102,33 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Call Groq API with Llama 3.3 70B
-    const groqResponse = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    // Determine provider: xAI Grok vs Groq Cloud
+    const isXaiGrok = apiKey.startsWith("xai-") || (clientModel && clientModel.includes("grok"));
+    
+    let apiUrl = "https://api.groq.com/openai/v1/chat/completions";
+    let targetModel = "llama-3.3-70b-versatile";
+
+    if (isXaiGrok) {
+      apiUrl = "https://api.x.ai/v1/chat/completions";
+      targetModel = clientModel && clientModel.includes("grok") ? clientModel : "grok-2-latest";
+    } else {
+      // For Groq Cloud: ensure we use an active model, never deprecated llama3-70b-8192
+      if (clientModel && ACTIVE_GROQ_MODELS.includes(clientModel)) {
+        targetModel = clientModel;
+      } else {
+        targetModel = "llama-3.3-70b-versatile";
+      }
+    }
+
+    // Call API
+    let groqResponse = await fetch(apiUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        model: model || "llama-3.3-70b-versatile",
+        model: targetModel,
         messages: [
           { role: "system", content: SYSTEM_PROMPT },
           {
@@ -113,11 +141,36 @@ export async function POST(req: NextRequest) {
       }),
     });
 
+    // If 404 Model Not Found and not xAI, retry with ultra-reliable llama-3.1-8b-instant
+    if (groqResponse.status === 404 && !isXaiGrok) {
+      console.warn(`Model ${targetModel} returned 404. Retrying with llama-3.1-8b-instant...`);
+      targetModel = "llama-3.1-8b-instant";
+      groqResponse = await fetch(apiUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: targetModel,
+          messages: [
+            { role: "system", content: SYSTEM_PROMPT },
+            {
+              role: "user",
+              content: `User instruction / Voice debrief from ${speakerName}:\n"""\n${transcript}\n"""`,
+            },
+          ],
+          response_format: { type: "json_object" },
+          temperature: 0.2,
+        }),
+      });
+    }
+
     if (!groqResponse.ok) {
       const errorText = await groqResponse.text();
-      console.error("Groq API error response:", errorText);
+      console.error(`AI API error (${groqResponse.status}):`, errorText);
       return NextResponse.json(
-        { error: "Groq API error", details: errorText },
+        { error: "AI API error", status: groqResponse.status, details: errorText },
         { status: groqResponse.status }
       );
     }
@@ -129,7 +182,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       success: true,
       data: parsedData,
-      modelUsed: model,
+      modelUsed: targetModel,
+      provider: isXaiGrok ? "xAI Grok" : "Groq LPU",
       usedGroqAI: true,
     });
   } catch (error: any) {
@@ -142,13 +196,19 @@ export async function POST(req: NextRequest) {
 }
 
 export async function GET() {
-  const hasKey = Boolean(
+  const hasGroq = Boolean(
     (process.env.GROQ_API_KEY && process.env.GROQ_API_KEY.startsWith("gsk_")) ||
     (process.env.NEXT_PUBLIC_GROQ_API_KEY && process.env.NEXT_PUBLIC_GROQ_API_KEY.startsWith("gsk_"))
   );
 
+  const hasGrok = Boolean(
+    (process.env.XAI_API_KEY && process.env.XAI_API_KEY.startsWith("xai-")) ||
+    (process.env.GROK_API_KEY && process.env.GROK_API_KEY.startsWith("xai-"))
+  );
+
   return NextResponse.json({
     status: "online",
-    groqConfiguredOnServer: hasKey,
+    groqConfiguredOnServer: hasGroq || hasGrok,
+    provider: hasGrok ? "xAI Grok" : hasGroq ? "Groq LPU" : "None",
   });
 }

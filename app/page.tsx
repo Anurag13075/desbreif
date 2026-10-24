@@ -363,7 +363,7 @@ export default function DebriefApp() {
             onClick={() => setCurrentTab(currentTab === "landing" ? "auto-pilot" : "landing")}
             className="hover:underline text-gray-300 font-medium"
           >
-            {currentTab === "landing" ? "← Back to Auto-pilot Studio (Image 1)" : "View Landing Page (Image 2) →"}
+            {currentTab === "landing" ? "← Back to Auto-pilot Studio " : "View Landing Page  →"}
           </button>
         </div>
       </div>

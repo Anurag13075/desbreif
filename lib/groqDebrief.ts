@@ -235,14 +235,15 @@ ${speakerName}`,
 }
 
 /**
- * Main execution agent: calls Groq Llama 3.3 via /api/debrief (or direct Groq API)
+ * Main execution agent: calls Groq LPU / xAI Grok via /api/debrief or direct client fetch
  */
 export async function processDebriefVoiceRamble(
   request: GroqDebriefRequest
 ): Promise<{ result: DebriefResult; usedGroqAI: boolean }> {
-  const { apiKey, model = "llama-3.3-70b-versatile", transcript, speakerName = "Anurag Sharma" } = request;
+  const { apiKey: rawApiKey, model: clientModel, transcript, speakerName = "Anurag Sharma" } = request;
+  const apiKey = (rawApiKey || "").trim();
 
-  // 1. Try our Next.js API route first (which reads server-side GROQ_API_KEY from Vercel)
+  // 1. Try our Next.js API route first (which reads server-side GROQ_API_KEY / GROK_API_KEY from Vercel)
   try {
     const apiRouteRes = await fetch("/api/debrief", {
       method: "POST",
@@ -250,7 +251,7 @@ export async function processDebriefVoiceRamble(
       body: JSON.stringify({
         transcript,
         apiKey,
-        model,
+        model: clientModel,
         speakerName,
       }),
     });
@@ -258,75 +259,34 @@ export async function processDebriefVoiceRamble(
     if (apiRouteRes.ok) {
       const json = await apiRouteRes.json();
       if (json.success && json.data) {
-        const parsed = json.data;
-
-        let finalEmail = parsed.emailDraft?.recipientEmail;
-        if (!finalEmail || finalEmail.includes("example.com")) {
-          finalEmail = lookupContactEmail(parsed.clientName || "Partner");
-        }
-
-        const debriefResult: DebriefResult = {
-          id: `debrief_${Date.now()}`,
-          createdAt: "Just now",
-          rawTranscript: transcript,
-          durationSeconds: Math.max(15, Math.round(transcript.split(" ").length / 2.5)),
-          clientName: parsed.clientName || "Client",
-          companyName: parsed.companyName || "Organization",
-          executiveSummary: parsed.executiveSummary || "Call concluded successfully.",
-          keyDecisions: parsed.keyDecisions || ["Key milestones ratified."],
-          sentiment: parsed.sentiment || "positive",
-          emailDraft: {
-            recipientName: parsed.emailDraft?.recipientName || parsed.clientName || "Client",
-            recipientEmail: finalEmail,
-            subject: parsed.emailDraft?.subject || `Follow-up: Meeting Recap`,
-            body: parsed.emailDraft?.body || `Hi ${parsed.clientName},\n\nGreat speaking with you today!`,
-            attachmentsMentioned: parsed.emailDraft?.attachmentsMentioned || [],
-          },
-          calendarEvent: {
-            title: parsed.calendarEvent?.title || `Follow-up Demo`,
-            startDate: parsed.calendarEvent?.startDate || "Friday",
-            startTime: parsed.calendarEvent?.startTime || "15:00",
-            endTime: parsed.calendarEvent?.endTime || "15:45",
-            durationMinutes: parsed.calendarEvent?.durationMinutes || 45,
-            location: parsed.calendarEvent?.location || "Google Meet",
-            attendees: [finalEmail, "you@domain.com"],
-            description: parsed.calendarEvent?.description || "Follow-up sync",
-          },
-          actionItems: parsed.actionItems || [],
-          crmUpdate: parsed.crmUpdate || {
-            clientName: parsed.clientName || "Client",
-            companyName: parsed.companyName || "Organization",
-            dealStage: "Pricing Approved",
-            dealValue: "$24,000 / year",
-            sentiment: "positive",
-            keyDecision: "Pricing approved",
-            nextStepSummary: "Follow-up demo",
-          },
-          teamHandoff: parsed.teamHandoff || {
-            targetPerson: "Anurag",
-            role: "Engineering",
-            messageSnippet: `Hey Anurag, please check the latest update from today's discussion.`,
-          },
-        };
-
-        return { result: debriefResult, usedGroqAI: true };
+        return { result: formatParsedResult(json.data, transcript), usedGroqAI: true };
       }
     }
   } catch (routeErr) {
-    console.warn("API route error, trying direct client call:", routeErr);
+    // API route might not be deployed yet on static preview
   }
 
-  // 2. Direct client fallback if API key is in browser localStorage
-  if (apiKey && apiKey.startsWith("gsk_")) {
+  // 2. Direct client fallback with multi-provider detection (GroqCloud vs xAI Grok)
+  if (apiKey && (apiKey.startsWith("gsk_") || apiKey.startsWith("xai-"))) {
+    const isXaiGrok = apiKey.startsWith("xai-") || (clientModel && clientModel.includes("grok"));
+    const endpoint = isXaiGrok
+      ? "https://api.x.ai/v1/chat/completions"
+      : "https://api.groq.com/openai/v1/chat/completions";
+
+    // Active models only
+    let activeModel = isXaiGrok
+      ? (clientModel && clientModel.includes("grok") ? clientModel : "grok-2-latest")
+      : (clientModel && ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"].includes(clientModel) ? clientModel : "llama-3.3-70b-versatile");
+
     try {
-      const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      let response = await fetch(endpoint, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${apiKey}`,
         },
         body: JSON.stringify({
-          model: model,
+          model: activeModel,
           messages: [
             { role: "system", content: SYSTEM_PROMPT },
             {
@@ -339,67 +299,92 @@ export async function processDebriefVoiceRamble(
         }),
       });
 
+      // If 404 (model deprecated or not found on Groq), retry with llama-3.1-8b-instant
+      if (response.status === 404 && !isXaiGrok) {
+        activeModel = "llama-3.1-8b-instant";
+        response = await fetch(endpoint, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify({
+            model: activeModel,
+            messages: [
+              { role: "system", content: SYSTEM_PROMPT },
+              {
+                role: "user",
+                content: `Voice Ramble / Prompt from ${speakerName}: "${transcript}"`,
+              },
+            ],
+            response_format: { type: "json_object" },
+            temperature: 0.2,
+          }),
+        });
+      }
+
       if (response.ok) {
         const data = await response.json();
         const parsed = JSON.parse(data.choices[0].message.content);
-
-        let finalEmail = parsed.emailDraft?.recipientEmail;
-        if (!finalEmail || finalEmail.includes("example.com")) {
-          finalEmail = lookupContactEmail(parsed.clientName || "Partner");
-        }
-
-        const debriefResult: DebriefResult = {
-          id: `debrief_${Date.now()}`,
-          createdAt: "Just now",
-          rawTranscript: transcript,
-          durationSeconds: Math.max(15, Math.round(transcript.split(" ").length / 2.5)),
-          clientName: parsed.clientName || "Client",
-          companyName: parsed.companyName || "Organization",
-          executiveSummary: parsed.executiveSummary || "Call concluded successfully.",
-          keyDecisions: parsed.keyDecisions || ["Key milestones ratified."],
-          sentiment: parsed.sentiment || "positive",
-          emailDraft: {
-            recipientName: parsed.emailDraft?.recipientName || parsed.clientName || "Client",
-            recipientEmail: finalEmail,
-            subject: parsed.emailDraft?.subject || `Follow-up: Meeting Recap`,
-            body: parsed.emailDraft?.body || `Hi ${parsed.clientName},\n\nGreat speaking with you today!`,
-            attachmentsMentioned: parsed.emailDraft?.attachmentsMentioned || [],
-          },
-          calendarEvent: {
-            title: parsed.calendarEvent?.title || `Follow-up Demo`,
-            startDate: parsed.calendarEvent?.startDate || "Friday",
-            startTime: parsed.calendarEvent?.startTime || "15:00",
-            endTime: parsed.calendarEvent?.endTime || "15:45",
-            durationMinutes: parsed.calendarEvent?.durationMinutes || 45,
-            location: parsed.calendarEvent?.location || "Google Meet",
-            attendees: [finalEmail, "you@domain.com"],
-            description: parsed.calendarEvent?.description || "Follow-up sync",
-          },
-          actionItems: parsed.actionItems || [],
-          crmUpdate: parsed.crmUpdate || {
-            clientName: parsed.clientName || "Client",
-            companyName: parsed.companyName || "Organization",
-            dealStage: "Pricing Approved",
-            dealValue: "$24,000 / year",
-            sentiment: "positive",
-            keyDecision: "Pricing approved",
-            nextStepSummary: "Follow-up demo",
-          },
-          teamHandoff: parsed.teamHandoff || {
-            targetPerson: "Anurag",
-            role: "Engineering",
-            messageSnippet: `Hey Anurag, please check the latest update from today's discussion.`,
-          },
-        };
-
-        return { result: debriefResult, usedGroqAI: true };
+        return { result: formatParsedResult(parsed, transcript), usedGroqAI: true };
       }
     } catch (err) {
-      console.warn("Groq API direct client error:", err);
+      console.warn("Direct client API error:", err);
     }
   }
 
-  // Contextual rule-based synthesizer fallback
+  // 3. High-fidelity contextual fallback
   const fallback = synthesizeFallbackDebrief(transcript, speakerName);
   return { result: fallback, usedGroqAI: false };
+}
+
+function formatParsedResult(parsed: any, rawTranscript: string): DebriefResult {
+  let finalEmail = parsed.emailDraft?.recipientEmail;
+  if (!finalEmail || finalEmail.includes("example.com")) {
+    finalEmail = lookupContactEmail(parsed.clientName || "Partner");
+  }
+
+  return {
+    id: `debrief_${Date.now()}`,
+    createdAt: "Just now",
+    rawTranscript: rawTranscript,
+    durationSeconds: Math.max(15, Math.round(rawTranscript.split(" ").length / 2.5)),
+    clientName: parsed.clientName || "Client",
+    companyName: parsed.companyName || "Organization",
+    executiveSummary: parsed.executiveSummary || "Call concluded successfully.",
+    keyDecisions: parsed.keyDecisions || ["Key milestones ratified."],
+    sentiment: parsed.sentiment || "positive",
+    emailDraft: {
+      recipientName: parsed.emailDraft?.recipientName || parsed.clientName || "Client",
+      recipientEmail: finalEmail,
+      subject: parsed.emailDraft?.subject || `Follow-up: Meeting Recap`,
+      body: parsed.emailDraft?.body || `Hi ${parsed.clientName},\n\nGreat speaking with you today!`,
+      attachmentsMentioned: parsed.emailDraft?.attachmentsMentioned || [],
+    },
+    calendarEvent: {
+      title: parsed.calendarEvent?.title || `Follow-up Demo`,
+      startDate: parsed.calendarEvent?.startDate || "Friday",
+      startTime: parsed.calendarEvent?.startTime || "15:00",
+      endTime: parsed.calendarEvent?.endTime || "15:45",
+      durationMinutes: parsed.calendarEvent?.durationMinutes || 45,
+      location: parsed.calendarEvent?.location || "Google Meet",
+      attendees: [finalEmail, "you@domain.com"],
+      description: parsed.calendarEvent?.description || "Follow-up sync",
+    },
+    actionItems: parsed.actionItems || [],
+    crmUpdate: parsed.crmUpdate || {
+      clientName: parsed.clientName || "Client",
+      companyName: parsed.companyName || "Organization",
+      dealStage: "Pricing Approved",
+      dealValue: "$24,000 / year",
+      sentiment: "positive",
+      keyDecision: "Pricing approved",
+      nextStepSummary: "Follow-up demo",
+    },
+    teamHandoff: parsed.teamHandoff || {
+      targetPerson: "Anurag",
+      role: "Engineering",
+      messageSnippet: `Hey Anurag, please check the latest update from today's discussion.`,
+    },
+  };
 }
