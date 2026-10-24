@@ -64,8 +64,8 @@ Return strict, valid JSON with this exact structure:
   }
 }`;
 
-const DEFAULT_MODEL = "openai/gpt-oss-20b";
-const BASE_GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
+const BASE_GROQ_URL = "https://api.groq.com/openai/v1";
+const DEFAULT_MODEL = "llama-3.3-70b-versatile";
 
 export async function POST(req: NextRequest) {
   try {
@@ -76,12 +76,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Empty transcript provided" }, { status: 400 });
     }
 
-    // Resolve API key from server environment OR client override
+    // Resolve API key: GroqCloud gsk_ key
     const rawKey =
       process.env.GROQ_API_KEY ||
       process.env.NEXT_PUBLIC_GROQ_API_KEY ||
-      process.env.GROK_API_KEY ||
-      process.env.XAI_API_KEY ||
       clientApiKey ||
       "";
 
@@ -90,19 +88,18 @@ export async function POST(req: NextRequest) {
     if (!apiKey) {
       return NextResponse.json(
         {
-          error: "Missing API Key",
-          message: "Please configure GROQ_API_KEY in Vercel or click Connect Groq in the top navbar.",
+          error: "Missing Groq API Key",
+          message: "Please configure GROQ_API_KEY (starts with gsk_) in Vercel or click Connect Groq.",
           needsKey: true,
         },
         { status: 401 }
       );
     }
 
-    let apiUrl = BASE_GROQ_URL;
     let targetModel = clientModel || DEFAULT_MODEL;
 
-    // Call Groq endpoint: https://api.groq.com/openai/v1/chat/completions
-    let groqResponse = await fetch(apiUrl, {
+    // Call Groq: POST https://api.groq.com/openai/v1/chat/completions
+    let groqResponse = await fetch(`${BASE_GROQ_URL}/chat/completions`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -122,11 +119,11 @@ export async function POST(req: NextRequest) {
       }),
     });
 
-    // If model not found or unavailable, try fallback models on Groq
+    // If model not found (404), fallback to llama-3.3-70b-versatile or llama-3.1-8b-instant
     if (groqResponse.status === 404 || groqResponse.status === 400) {
       console.warn(`Model ${targetModel} returned ${groqResponse.status}. Retrying with llama-3.3-70b-versatile...`);
       targetModel = "llama-3.3-70b-versatile";
-      groqResponse = await fetch(apiUrl, {
+      groqResponse = await fetch(`${BASE_GROQ_URL}/chat/completions`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -148,7 +145,7 @@ export async function POST(req: NextRequest) {
 
       if (!groqResponse.ok) {
         targetModel = "llama-3.1-8b-instant";
-        groqResponse = await fetch(apiUrl, {
+        groqResponse = await fetch(`${BASE_GROQ_URL}/chat/completions`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -172,9 +169,9 @@ export async function POST(req: NextRequest) {
 
     if (!groqResponse.ok) {
       const errorText = await groqResponse.text();
-      console.error(`AI API error (${groqResponse.status}):`, errorText);
+      console.error(`Groq API error (${groqResponse.status}):`, errorText);
       return NextResponse.json(
-        { error: "AI API error", status: groqResponse.status, details: errorText },
+        { error: "Groq API error", status: groqResponse.status, details: errorText },
         { status: groqResponse.status }
       );
     }
@@ -187,7 +184,7 @@ export async function POST(req: NextRequest) {
       success: true,
       data: parsedData,
       modelUsed: targetModel,
-      endpointUsed: apiUrl,
+      endpointUsed: `${BASE_GROQ_URL}/chat/completions`,
       usedGroqAI: true,
     });
   } catch (error: any) {
@@ -199,16 +196,37 @@ export async function POST(req: NextRequest) {
   }
 }
 
+// GET /api/debrief: queries GET https://api.groq.com/openai/v1/models dynamically
 export async function GET() {
-  const hasGroq = Boolean(
-    (process.env.GROQ_API_KEY && process.env.GROQ_API_KEY.startsWith("gsk_")) ||
-    (process.env.NEXT_PUBLIC_GROQ_API_KEY && process.env.NEXT_PUBLIC_GROQ_API_KEY.startsWith("gsk_"))
-  );
+  const apiKey = (
+    process.env.GROQ_API_KEY ||
+    process.env.NEXT_PUBLIC_GROQ_API_KEY ||
+    ""
+  ).trim();
+
+  let liveModels: string[] = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"];
+
+  if (apiKey) {
+    try {
+      const res = await fetch(`${BASE_GROQ_URL}/models`, {
+        headers: { Authorization: `Bearer ${apiKey}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.data)) {
+          liveModels = data.data.map((m: any) => m.id);
+        }
+      }
+    } catch (e) {
+      console.warn("Could not query live Groq models:", e);
+    }
+  }
 
   return NextResponse.json({
     status: "online",
-    groqConfiguredOnServer: hasGroq,
+    groqConfiguredOnServer: Boolean(apiKey),
     defaultModel: DEFAULT_MODEL,
-    baseEndpoint: "https://api.groq.com/openai/v1",
+    baseEndpoint: BASE_GROQ_URL,
+    liveModels,
   });
 }

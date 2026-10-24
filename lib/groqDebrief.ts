@@ -9,6 +9,9 @@ interface GroqDebriefRequest {
   speakerName?: string;
 }
 
+const GROQ_BASE_URL = "https://api.groq.com/openai/v1";
+const DEFAULT_MODEL = "llama-3.3-70b-versatile";
+
 const SYSTEM_PROMPT = `You are Debrief, the intelligent 30-Second Post-Call Auto-Pilot for Wispr Flow (#NoHandsChallenge).
 Your job is to take an informal, rushed, raw post-call voice ramble or explicit user instruction (e.g., "Write an email for Anuj considering our meeting about design engineering for our product, this happened, and this happened") and instantly synthesize high-fidelity, production-ready operational artifacts.
 
@@ -235,15 +238,18 @@ ${speakerName}`,
 }
 
 /**
- * Main execution agent: calls Groq LPU / xAI Grok via /api/debrief or direct client fetch
+ * Main execution agent: calls Groq LPU via /api/debrief (or direct Groq API)
+ * Provider: Groq (GroqCloud, gsk_ keys)
+ * Base URL: https://api.groq.com/openai/v1
+ * Default Model: llama-3.3-70b-versatile
  */
 export async function processDebriefVoiceRamble(
   request: GroqDebriefRequest
 ): Promise<{ result: DebriefResult; usedGroqAI: boolean }> {
-  const { apiKey: rawApiKey, model: clientModel = "openai/gpt-oss-20b", transcript, speakerName = "Anurag Sharma" } = request;
+  const { apiKey: rawApiKey, model: clientModel = DEFAULT_MODEL, transcript, speakerName = "Anurag Sharma" } = request;
   const apiKey = (rawApiKey || "").trim();
 
-  // 1. Try our Next.js API route first (which reads server-side GROQ_API_KEY from Vercel)
+  // 1. Primary path: Call Next.js API route /api/debrief
   try {
     const apiRouteRes = await fetch("/api/debrief", {
       method: "POST",
@@ -263,29 +269,22 @@ export async function processDebriefVoiceRamble(
       }
     }
   } catch (routeErr) {
-    // API route might not be deployed yet on static preview
+    // API route fallback
   }
 
-  // 2. Direct client fallback with base endpoint https://api.groq.com/openai/v1/chat/completions
-  if (apiKey && (apiKey.startsWith("gsk_") || apiKey.startsWith("xai-"))) {
-    const isXaiGrok = apiKey.startsWith("xai-");
-    const endpoint = isXaiGrok
-      ? "https://api.x.ai/v1/chat/completions"
-      : "https://api.groq.com/openai/v1/chat/completions";
-
-    let activeModel = isXaiGrok
-      ? "grok-2-latest"
-      : "llama-3.3-70b-versatile";
+  // 2. Direct client fallback using official Groq endpoint: https://api.groq.com/openai/v1/chat/completions
+  if (apiKey && apiKey.startsWith("gsk_")) {
+    let targetModel = clientModel || DEFAULT_MODEL;
 
     try {
-      let response = await fetch(endpoint, {
+      let response = await fetch(`${GROQ_BASE_URL}/chat/completions`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${apiKey}`,
         },
         body: JSON.stringify({
-          model: activeModel,
+          model: targetModel,
           messages: [
             { role: "system", content: SYSTEM_PROMPT },
             {
@@ -298,17 +297,17 @@ export async function processDebriefVoiceRamble(
         }),
       });
 
-      // If 404/400 (model issue), fallback to llama-3.3-70b-versatile or llama-3.1-8b-instant on Groq
-      if (!response.ok && !isXaiGrok) {
-        activeModel = "llama-3.3-70b-versatile";
-        response = await fetch(endpoint, {
+      // If 404 (model not found), automatically fallback to llama-3.1-8b-instant
+      if (response.status === 404 || response.status === 400) {
+        targetModel = "llama-3.1-8b-instant";
+        response = await fetch(`${GROQ_BASE_URL}/chat/completions`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
             Authorization: `Bearer ${apiKey}`,
           },
           body: JSON.stringify({
-            model: activeModel,
+            model: targetModel,
             messages: [
               { role: "system", content: SYSTEM_PROMPT },
               {
@@ -320,29 +319,6 @@ export async function processDebriefVoiceRamble(
             temperature: 0.2,
           }),
         });
-
-        if (!response.ok) {
-          activeModel = "llama-3.1-8b-instant";
-          response = await fetch(endpoint, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${apiKey}`,
-            },
-            body: JSON.stringify({
-              model: activeModel,
-              messages: [
-                { role: "system", content: SYSTEM_PROMPT },
-                {
-                  role: "user",
-                  content: `Voice Ramble / Prompt from ${speakerName}: "${transcript}"`,
-                },
-              ],
-              response_format: { type: "json_object" },
-              temperature: 0.2,
-            }),
-          });
-        }
       }
 
       if (response.ok) {
@@ -351,7 +327,7 @@ export async function processDebriefVoiceRamble(
         return { result: formatParsedResult(parsed, transcript), usedGroqAI: true };
       }
     } catch (err) {
-      console.warn("Direct client API error:", err);
+      console.warn("Direct Groq API error:", err);
     }
   }
 

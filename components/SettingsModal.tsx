@@ -19,7 +19,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   currentModel,
 }) => {
   const [inputKey, setInputKey] = useState(apiKey);
-  const [selectedModel, setSelectedModel] = useState(currentModel || "openai/gpt-oss-20b");
+  const [selectedModel, setSelectedModel] = useState(currentModel || "llama-3.3-70b-versatile");
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
   if (!isOpen) return null;
@@ -75,14 +75,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               onChange={(e) => setSelectedModel(e.target.value)}
               className="w-full px-3.5 py-2.5 rounded-xl bg-wispr-sand/30 border border-wispr-border text-xs text-wispr-ink focus:outline-none focus:border-wispr-ink focus:bg-white font-medium cursor-pointer"
             >
-              <option value="openai/gpt-oss-20b">
-                OpenAI GPT-OSS 20B (Recommended • ~1,000 tps on Groq)
-              </option>
               <option value="llama-3.3-70b-versatile">
-                Llama 3.3 70B Versatile
+                Llama 3.3 70B Versatile (Default • Recommended Production Model)
               </option>
               <option value="llama-3.1-8b-instant">
-                Llama 3.1 8B Instant (Sub-300ms Ultra-Fast)
+                Llama 3.1 8B Instant (Ultra-Fast Extraction • Sub-300ms)
+              </option>
+              <option value="openai/gpt-oss-120b">
+                OpenAI GPT-OSS 120B (Reasoning & Tool Use)
+              </option>
+              <option value="openai/gpt-oss-20b">
+                OpenAI GPT-OSS 20B (MoE Compact)
               </option>
             </select>
           </div>
