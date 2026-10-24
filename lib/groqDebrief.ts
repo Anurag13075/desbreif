@@ -1,4 +1,5 @@
-import { DebriefResult, DEFAULT_DEBRIEF_RESULT } from "./types";
+import { DebriefResult } from "./types";
+import { DEFAULT_DEBRIEF_RESULT } from "./presetScenarios";
 
 interface GroqDebriefRequest {
   apiKey?: string;
