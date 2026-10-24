@@ -65,7 +65,24 @@ Return strict, valid JSON with this exact structure:
 }`;
 
 const BASE_GROQ_URL = "https://api.groq.com/openai/v1";
-const DEFAULT_MODEL = "llama-3.3-70b-versatile";
+// Production models ordered by priority. openai/gpt-oss-120b & 20b are confirmed live on the account.
+const PRIORITY_MODELS = [
+  "openai/gpt-oss-120b",
+  "openai/gpt-oss-20b",
+  "llama-3.3-70b-versatile",
+  "llama-3.1-8b-instant",
+];
+const DEFAULT_MODEL = "openai/gpt-oss-120b";
+
+function cleanJsonString(str: string): string {
+  let cleaned = str.trim();
+  if (cleaned.startsWith("```json")) {
+    cleaned = cleaned.replace(/^```json\s*/i, "").replace(/\s*```$/, "");
+  } else if (cleaned.startsWith("```")) {
+    cleaned = cleaned.replace(/^```\s*/, "").replace(/\s*```$/, "");
+  }
+  return cleaned.trim();
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -96,63 +113,25 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    let targetModel = clientModel || DEFAULT_MODEL;
+    // Build candidate list: client choice first, followed by known available models
+    const candidates = Array.from(
+      new Set([clientModel, ...PRIORITY_MODELS].filter(Boolean) as string[])
+    );
 
-    // Call Groq: POST https://api.groq.com/openai/v1/chat/completions
-    let groqResponse = await fetch(`${BASE_GROQ_URL}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: targetModel,
-        messages: [
-          { role: "system", content: SYSTEM_PROMPT },
-          {
-            role: "user",
-            content: `User instruction / Voice debrief from ${speakerName}:\n"""\n${transcript}\n"""`,
-          },
-        ],
-        response_format: { type: "json_object" },
-        temperature: 0.2,
-      }),
-    });
+    let groqResponse: Response | null = null;
+    let successfulModel = candidates[0];
+    let lastError = "";
 
-    // If model not found (404), fallback to llama-3.3-70b-versatile or llama-3.1-8b-instant
-    if (groqResponse.status === 404 || groqResponse.status === 400) {
-      console.warn(`Model ${targetModel} returned ${groqResponse.status}. Retrying with llama-3.3-70b-versatile...`);
-      targetModel = "llama-3.3-70b-versatile";
-      groqResponse = await fetch(`${BASE_GROQ_URL}/chat/completions`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          model: targetModel,
-          messages: [
-            { role: "system", content: SYSTEM_PROMPT },
-            {
-              role: "user",
-              content: `User instruction / Voice debrief from ${speakerName}:\n"""\n${transcript}\n"""`,
-            },
-          ],
-          response_format: { type: "json_object" },
-          temperature: 0.2,
-        }),
-      });
-
-      if (!groqResponse.ok) {
-        targetModel = "llama-3.1-8b-instant";
-        groqResponse = await fetch(`${BASE_GROQ_URL}/chat/completions`, {
+    for (const modelToTry of candidates) {
+      try {
+        const res = await fetch(`${BASE_GROQ_URL}/chat/completions`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
             Authorization: `Bearer ${apiKey}`,
           },
           body: JSON.stringify({
-            model: targetModel,
+            model: modelToTry,
             messages: [
               { role: "system", content: SYSTEM_PROMPT },
               {
@@ -164,26 +143,37 @@ export async function POST(req: NextRequest) {
             temperature: 0.2,
           }),
         });
+
+        if (res.ok) {
+          groqResponse = res;
+          successfulModel = modelToTry;
+          break;
+        } else {
+          lastError = await res.text();
+          console.warn(`Groq model ${modelToTry} failed (${res.status}): ${lastError}. Trying next candidate...`);
+        }
+      } catch (err: any) {
+        lastError = err.message || String(err);
       }
     }
 
-    if (!groqResponse.ok) {
-      const errorText = await groqResponse.text();
-      console.error(`Groq API error (${groqResponse.status}):`, errorText);
+    if (!groqResponse || !groqResponse.ok) {
+      console.error("All Groq candidate models failed:", lastError);
       return NextResponse.json(
-        { error: "Groq API error", status: groqResponse.status, details: errorText },
-        { status: groqResponse.status }
+        { error: "Groq API error", details: lastError },
+        { status: 502 }
       );
     }
 
     const data = await groqResponse.json();
-    const rawContent = data.choices[0]?.message?.content;
-    const parsedData = JSON.parse(rawContent);
+    const rawContent = data.choices[0]?.message?.content || "{}";
+    const cleaned = cleanJsonString(rawContent);
+    const parsedData = JSON.parse(cleaned);
 
     return NextResponse.json({
       success: true,
       data: parsedData,
-      modelUsed: targetModel,
+      modelUsed: successfulModel,
       endpointUsed: `${BASE_GROQ_URL}/chat/completions`,
       usedGroqAI: true,
     });

@@ -10,7 +10,13 @@ interface GroqDebriefRequest {
 }
 
 const GROQ_BASE_URL = "https://api.groq.com/openai/v1";
-const DEFAULT_MODEL = "llama-3.3-70b-versatile";
+const PRIORITY_MODELS = [
+  "openai/gpt-oss-120b",
+  "openai/gpt-oss-20b",
+  "llama-3.3-70b-versatile",
+  "llama-3.1-8b-instant",
+];
+const DEFAULT_MODEL = "openai/gpt-oss-120b";
 
 const SYSTEM_PROMPT = `You are Debrief, the intelligent 30-Second Post-Call Auto-Pilot for Wispr Flow (#NoHandsChallenge).
 Your job is to take an informal, rushed, raw post-call voice ramble or explicit user instruction (e.g., "Write an email for Anuj considering our meeting about design engineering for our product, this happened, and this happened") and instantly synthesize high-fidelity, production-ready operational artifacts.
@@ -274,40 +280,20 @@ export async function processDebriefVoiceRamble(
 
   // 2. Direct client fallback using official Groq endpoint: https://api.groq.com/openai/v1/chat/completions
   if (apiKey && apiKey.startsWith("gsk_")) {
-    let targetModel = clientModel || DEFAULT_MODEL;
+    const candidates = Array.from(
+      new Set([clientModel, ...PRIORITY_MODELS].filter(Boolean) as string[])
+    );
 
-    try {
-      let response = await fetch(`${GROQ_BASE_URL}/chat/completions`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          model: targetModel,
-          messages: [
-            { role: "system", content: SYSTEM_PROMPT },
-            {
-              role: "user",
-              content: `Voice Ramble / Prompt from ${speakerName}: "${transcript}"`,
-            },
-          ],
-          response_format: { type: "json_object" },
-          temperature: 0.2,
-        }),
-      });
-
-      // If 404 (model not found), automatically fallback to llama-3.1-8b-instant
-      if (response.status === 404 || response.status === 400) {
-        targetModel = "llama-3.1-8b-instant";
-        response = await fetch(`${GROQ_BASE_URL}/chat/completions`, {
+    for (const modelToTry of candidates) {
+      try {
+        const response = await fetch(`${GROQ_BASE_URL}/chat/completions`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
             Authorization: `Bearer ${apiKey}`,
           },
           body: JSON.stringify({
-            model: targetModel,
+            model: modelToTry,
             messages: [
               { role: "system", content: SYSTEM_PROMPT },
               {
@@ -319,15 +305,17 @@ export async function processDebriefVoiceRamble(
             temperature: 0.2,
           }),
         });
-      }
 
-      if (response.ok) {
-        const data = await response.json();
-        const parsed = JSON.parse(data.choices[0].message.content);
-        return { result: formatParsedResult(parsed, transcript), usedGroqAI: true };
+        if (response.ok) {
+          const data = await response.json();
+          let rawContent = data.choices[0]?.message?.content || "{}";
+          rawContent = rawContent.replace(/^```json\s*/i, "").replace(/^```\s*/, "").replace(/\s*```$/, "").trim();
+          const parsed = JSON.parse(rawContent);
+          return { result: formatParsedResult(parsed, transcript), usedGroqAI: true };
+        }
+      } catch (err) {
+        console.warn(`Direct Groq API candidate ${modelToTry} error:`, err);
       }
-    } catch (err) {
-      console.warn("Direct Groq API error:", err);
     }
   }
 

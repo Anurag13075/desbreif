@@ -49,7 +49,7 @@ export default function DebriefApp() {
   const [isIntegrationsModalOpen, setIsIntegrationsModalOpen] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [groqApiKey, setGroqApiKey] = useState("");
-  const [selectedModel, setSelectedModel] = useState("llama-3.3-70b-versatile");
+  const [selectedModel, setSelectedModel] = useState("openai/gpt-oss-120b");
   const [isServerGroqActive, setIsServerGroqActive] = useState(false);
   const [feedbackToast, setFeedbackToast] = useState<{ message: string; type: "success" | "info" } | null>(null);
 
@@ -65,10 +65,10 @@ export default function DebriefApp() {
       if (savedKey) setGroqApiKey(savedKey);
 
       const savedModel = localStorage.getItem("debrief_groq_model");
-      if (savedModel && ["llama-3.3-70b-versatile", "llama-3.1-8b-instant", "openai/gpt-oss-120b", "openai/gpt-oss-20b"].includes(savedModel)) {
+      if (savedModel && ["openai/gpt-oss-120b", "openai/gpt-oss-20b", "llama-3.3-70b-versatile", "llama-3.1-8b-instant"].includes(savedModel)) {
         setSelectedModel(savedModel);
       } else {
-        setSelectedModel("llama-3.3-70b-versatile");
+        setSelectedModel("openai/gpt-oss-120b");
       }
 
       const savedHistory = localStorage.getItem("debrief_call_vault_v2");
