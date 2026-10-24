@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
 import {
   Mail,
   Calendar,
@@ -13,17 +13,30 @@ import {
   CheckCircle2,
   Clock,
   Layers,
+  Link2,
+  ExternalLink,
+  Zap,
+  ShieldCheck,
+  Check,
 } from "lucide-react";
+import { CONNECTOR_CATALOG, ConnectorDef } from "@/lib/connectors/catalog";
 
 interface LandingViewProps {
   onLaunchAutoPilot: () => void;
   onOpenVault: () => void;
+  onOpenConnectorsModal?: () => void;
 }
 
 export const LandingView: React.FC<LandingViewProps> = ({
   onLaunchAutoPilot,
   onOpenVault,
+  onOpenConnectorsModal,
 }) => {
+  const [selectedCat, setSelectedCat] = useState<string>("all");
+
+  // Split catalog into 2 rows for opposite marquee animations
+  const row1Connectors = CONNECTOR_CATALOG.slice(0, 16);
+  const row2Connectors = CONNECTOR_CATALOG.slice(16, 32);
   return (
     <div className="min-h-screen bg-white text-[#111827] flex flex-col font-sans selection:bg-[#EEF0FF]">
       
@@ -100,8 +113,22 @@ export const LandingView: React.FC<LandingViewProps> = ({
           </a>
         </div>
 
-        {/* Interactive Visual Mockup with Synapse Connecting Lines */}
-        <div className="pt-10 max-w-4xl mx-auto">
+        {/* Interactive Visual Mockup with Synapse Connecting Lines & Floating Status Badges */}
+        <div className="pt-10 max-w-4xl mx-auto relative">
+          
+          {/* Floating Live Connector Pills around Mockup */}
+          <div className="hidden lg:flex items-center space-x-2 px-3.5 py-2 rounded-2xl bg-white border border-[#E5E7EB] shadow-elevated absolute -top-2 -left-8 z-20 animate-float-1">
+            <div className="w-2.5 h-2.5 rounded-full bg-[#10B981] animate-pulse"></div>
+            <span className="text-[11px] font-bold text-[#111827]">Gmail API:</span>
+            <span className="text-[11px] text-[#4B5563]">Real draft ready for Anuj</span>
+          </div>
+
+          <div className="hidden lg:flex items-center space-x-2 px-3.5 py-2 rounded-2xl bg-white border border-[#E5E7EB] shadow-elevated absolute -bottom-4 -right-6 z-20 animate-float-2">
+            <div className="w-2.5 h-2.5 rounded-full bg-[#3B4BF8] animate-pulse"></div>
+            <span className="text-[11px] font-bold text-[#111827]">Linear + Slack:</span>
+            <span className="text-[11px] text-[#4B5563]">2 handoffs queued for Alex</span>
+          </div>
+
           <div className="bg-[#F8F9FB] rounded-4xl p-6 sm:p-10 border border-[#E5E7EB] shadow-xl text-left relative overflow-hidden">
             
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6 relative z-10 items-center">
@@ -181,35 +208,155 @@ export const LandingView: React.FC<LandingViewProps> = ({
 
       </section>
 
-      {/* Section: Works inside the tools you already open */}
-      <section id="integrations" className="max-w-6xl mx-auto w-full px-6 py-16 text-center space-y-8 border-t border-[#F3F4F6]">
-        <div className="space-y-2 max-w-2xl mx-auto">
-          <h2 className="text-2xl sm:text-3xl font-extrabold text-[#111827]">
-            Works inside the tools you already open after every call
+      {/* Section: 32 App Connectors Floating Ecosystem Showcase */}
+      <section id="integrations" className="max-w-7xl mx-auto w-full px-4 sm:px-6 py-20 text-center space-y-10 border-t border-[#F3F4F6] overflow-hidden">
+        
+        <div className="space-y-3 max-w-3xl mx-auto">
+          <div className="inline-flex items-center space-x-2 px-3.5 py-1.5 rounded-full bg-[#EEF0FF] text-[#3B4BF8] text-xs font-bold border border-[#3B4BF8]/20 shadow-2xs">
+            <Sparkles className="w-3.5 h-3.5" />
+            <span>32 Production App Connectors</span>
+          </div>
+          <h2 className="text-3xl sm:text-4xl font-extrabold text-[#111827] tracking-tight">
+            Works inside all 32 tools you open after every call
           </h2>
-          <p className="text-xs sm:text-sm text-[#4B5563]">
-            Connect once. Debrief fills each app with the right details, and you approve before anything is sent.
+          <p className="text-xs sm:text-sm text-[#4B5563] max-w-2xl mx-auto leading-relaxed">
+            Connect once. Debrief fills each app with real context, customized email drafts, calendar slots, and task handoffs. You approve before anything is sent.
           </p>
         </div>
 
-        {/* Integration Pills Row (Exact match to Image 2) */}
-        <div className="flex flex-wrap items-center justify-center gap-3">
-          {[
-            { icon: Mail, label: "Gmail" },
-            { icon: Calendar, label: "Calendar" },
-            { icon: FileText, label: "Notion" },
-            { icon: Users, label: "Your CRM" },
-            { icon: CheckSquare, label: "Tasks" },
-          ].map((tool, idx) => (
-            <div
-              key={idx}
-              className="px-5 py-2.5 rounded-2xl bg-white border border-[#E5E7EB] shadow-xs flex items-center space-x-2 text-xs font-bold text-[#111827]"
-            >
-              <tool.icon className="w-4 h-4 text-[#3B4BF8]" />
-              <span>{tool.label}</span>
+        {/* Dual Marquee Floating Connector Rows */}
+        <div className="space-y-4 py-4 relative">
+          
+          {/* Subtle gradient edge fades */}
+          <div className="absolute left-0 top-0 bottom-0 w-16 sm:w-28 bg-gradient-to-r from-white to-transparent z-10 pointer-events-none" />
+          <div className="absolute right-0 top-0 bottom-0 w-16 sm:w-28 bg-gradient-to-l from-white to-transparent z-10 pointer-events-none" />
+
+          {/* Marquee Track 1 (Leftward Flow) */}
+          <div className="overflow-hidden py-1">
+            <div className="animate-marquee-track flex gap-4">
+              {[...row1Connectors, ...row1Connectors].map((conn, idx) => (
+                <div
+                  key={`track1-${conn.id}-${idx}`}
+                  onClick={onOpenConnectorsModal}
+                  className="flex items-center space-x-3 px-4 py-2.5 rounded-2xl bg-white border border-[#E5E7EB] hover:border-[#3B4BF8] hover:shadow-md cursor-pointer transition-all duration-200 transform hover:-translate-y-1 group flex-shrink-0"
+                >
+                  <div
+                    style={{ backgroundColor: conn.color }}
+                    className="w-7 h-7 rounded-xl flex items-center justify-center text-white text-xs font-bold shadow-2xs group-hover:scale-105 transition-transform"
+                  >
+                    {conn.name.charAt(0)}
+                  </div>
+                  <div className="text-left">
+                    <span className="text-xs font-bold text-[#111827] block group-hover:text-[#3B4BF8] transition-colors">
+                      {conn.name}
+                    </span>
+                    <span className="text-[10px] text-[#9CA3AF] capitalize block">
+                      {conn.category} • {conn.authType}
+                    </span>
+                  </div>
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#10B981] group-hover:scale-125 transition-transform" />
+                </div>
+              ))}
             </div>
-          ))}
+          </div>
+
+          {/* Marquee Track 2 (Rightward Flow) */}
+          <div className="overflow-hidden py-1">
+            <div className="animate-marquee-track-reverse flex gap-4">
+              {[...row2Connectors, ...row2Connectors].map((conn, idx) => (
+                <div
+                  key={`track2-${conn.id}-${idx}`}
+                  onClick={onOpenConnectorsModal}
+                  className="flex items-center space-x-3 px-4 py-2.5 rounded-2xl bg-white border border-[#E5E7EB] hover:border-[#3B4BF8] hover:shadow-md cursor-pointer transition-all duration-200 transform hover:-translate-y-1 group flex-shrink-0"
+                >
+                  <div
+                    style={{ backgroundColor: conn.color }}
+                    className="w-7 h-7 rounded-xl flex items-center justify-center text-white text-xs font-bold shadow-2xs group-hover:scale-105 transition-transform"
+                  >
+                    {conn.name.charAt(0)}
+                  </div>
+                  <div className="text-left">
+                    <span className="text-xs font-bold text-[#111827] block group-hover:text-[#3B4BF8] transition-colors">
+                      {conn.name}
+                    </span>
+                    <span className="text-[10px] text-[#9CA3AF] capitalize block">
+                      {conn.category} • {conn.authType}
+                    </span>
+                  </div>
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#3B4BF8] group-hover:scale-125 transition-transform" />
+                </div>
+              ))}
+            </div>
+          </div>
+
         </div>
+
+        {/* 4 Interactive Capability Cards */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 max-w-5xl mx-auto pt-4 text-left">
+          
+          <div className="p-4 rounded-2xl bg-[#F9FAFB] border border-[#E5E7EB] space-y-2">
+            <div className="w-8 h-8 rounded-xl bg-[#EEF0FF] text-[#3B4BF8] flex items-center justify-center font-bold text-xs">
+              <Mail className="w-4 h-4" />
+            </div>
+            <div className="text-xs font-bold text-[#111827]">Communication</div>
+            <p className="text-[11px] text-[#6B7280] leading-snug">
+              Gmail, WhatsApp, Slack, Outlook, Discord, Telegram with real recipients.
+            </p>
+          </div>
+
+          <div className="p-4 rounded-2xl bg-[#F9FAFB] border border-[#E5E7EB] space-y-2">
+            <div className="w-8 h-8 rounded-xl bg-[#ECFDF5] text-[#059669] flex items-center justify-center font-bold text-xs">
+              <Calendar className="w-4 h-4" />
+            </div>
+            <div className="text-xs font-bold text-[#111827]">Calendars & Scheduling</div>
+            <p className="text-[11px] text-[#6B7280] leading-snug">
+              Google Calendar, Apple Cal, Calendly, Cal.com with conflict auto-shift.
+            </p>
+          </div>
+
+          <div className="p-4 rounded-2xl bg-[#F9FAFB] border border-[#E5E7EB] space-y-2">
+            <div className="w-8 h-8 rounded-xl bg-[#FEF3C7] text-[#D97706] flex items-center justify-center font-bold text-xs">
+              <CheckSquare className="w-4 h-4" />
+            </div>
+            <div className="text-xs font-bold text-[#111827]">Engineering & Tasks</div>
+            <p className="text-[11px] text-[#6B7280] leading-snug">
+              Linear, GitHub Issues, Jira, Todoist, Asana, ClickUp task syncing.
+            </p>
+          </div>
+
+          <div className="p-4 rounded-2xl bg-[#F9FAFB] border border-[#E5E7EB] space-y-2">
+            <div className="w-8 h-8 rounded-xl bg-[#F3E8FF] text-[#7C3AED] flex items-center justify-center font-bold text-xs">
+              <Users className="w-4 h-4" />
+            </div>
+            <div className="text-xs font-bold text-[#111827]">CRM & Automation</div>
+            <p className="text-[11px] text-[#6B7280] leading-snug">
+              HubSpot, Salesforce, Pipedrive, Close, Stripe, Zapier, Make webhooks.
+            </p>
+          </div>
+
+        </div>
+
+        {/* Call to Action Button */}
+        <div className="pt-2">
+          {onOpenConnectorsModal ? (
+            <button
+              onClick={onOpenConnectorsModal}
+              className="px-5 py-2.5 rounded-xl bg-[#3B4BF8] hover:bg-[#2B3BE5] text-white text-xs font-semibold shadow-sm inline-flex items-center space-x-2 transition-all"
+            >
+              <Link2 className="w-4 h-4" />
+              <span>Configure Any of the 32 App Connectors</span>
+            </button>
+          ) : (
+            <button
+              onClick={onLaunchAutoPilot}
+              className="px-5 py-2.5 rounded-xl bg-[#3B4BF8] hover:bg-[#2B3BE5] text-white text-xs font-semibold shadow-sm inline-flex items-center space-x-2 transition-all"
+            >
+              <span>Try Live Debrief with Connectors</span>
+              <ArrowRight className="w-4 h-4" />
+            </button>
+          )}
+        </div>
+
       </section>
 
       {/* Section: Three steps, and the first one is just talking */}

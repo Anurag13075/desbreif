@@ -393,6 +393,7 @@ export default function DebriefApp() {
         <LandingView
           onLaunchAutoPilot={() => setCurrentTab("auto-pilot")}
           onOpenVault={() => setCurrentTab("call-vault")}
+          onOpenConnectorsModal={() => setIsIntegrationsModalOpen(true)}
         />
       ) : (
         /* RENDER VIEW: Auto-Pilot Studio with Left Sidebar & Top Header (Image 1) */
