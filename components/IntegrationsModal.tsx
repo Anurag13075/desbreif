@@ -3,8 +3,8 @@
 import React, { useState, useEffect } from "react";
 import {
   X,
+  Search,
   CheckCircle2,
-  AlertCircle,
   ExternalLink,
   ShieldCheck,
   Zap,
@@ -15,17 +15,23 @@ import {
   Building2,
   Save,
   Link2,
+  Check,
+  Plus,
+  SlidersHorizontal,
+  ChevronRight,
+  ArrowLeft,
 } from "lucide-react";
+import { CONNECTOR_CATALOG, ConnectorDef } from "@/lib/connectors/catalog";
 import {
-  AppConnections,
-  getSavedConnections,
-  saveConnections,
-} from "@/lib/connectors/connectorStore";
+  getAllSavedConfigs,
+  saveConnectorConfig,
+  isConnectorConfigured,
+} from "@/lib/connectors/multiConnectorEngine";
 
 interface IntegrationsModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onConnectionsUpdated: (connections: AppConnections) => void;
+  onConnectionsUpdated?: () => void;
 }
 
 export const IntegrationsModal: React.FC<IntegrationsModalProps> = ({
@@ -33,117 +39,83 @@ export const IntegrationsModal: React.FC<IntegrationsModalProps> = ({
   onClose,
   onConnectionsUpdated,
 }) => {
-  const [connections, setConnections] = useState<AppConnections>(getSavedConnections());
-  const [activeTab, setActiveTab] = useState<"google" | "slack" | "notion" | "hubspot">("google");
+  const [selectedCategory, setSelectedCategory] = useState<string>("all");
+  const [searchQuery, setSearchQuery] = useState<string>("");
+  const [activeConnector, setActiveConnector] = useState<ConnectorDef | null>(null);
+  const [connectorForm, setConnectorForm] = useState<Record<string, string>>({});
   const [toastMessage, setToastMessage] = useState<string | null>(null);
-
-  // Form states
-  const [googleToken, setGoogleToken] = useState("");
-  const [googleEmail, setGoogleEmail] = useState("");
-  const [slackWebhook, setSlackWebhook] = useState("");
-  const [slackChannel, setSlackChannel] = useState("");
-  const [notionKey, setNotionKey] = useState("");
-  const [notionDb, setNotionDb] = useState("");
-  const [hubspotKey, setHubspotKey] = useState("");
+  const [allConfigs, setAllConfigs] = useState<Record<string, Record<string, string>>>({});
 
   useEffect(() => {
-    const saved = getSavedConnections();
-    setConnections(saved);
-    setGoogleToken(saved.google?.accessToken || "");
-    setGoogleEmail(saved.google?.userEmail || "");
-    setSlackWebhook(saved.slack?.webhookUrl || "");
-    setSlackChannel(saved.slack?.channel || "#general");
-    setNotionKey(saved.notion?.apiKey || "");
-    setNotionDb(saved.notion?.databaseId || "");
-    setHubspotKey(saved.hubspot?.apiKey || "");
+    if (isOpen) {
+      setAllConfigs(getAllSavedConfigs());
+      setActiveConnector(null);
+    }
   }, [isOpen]);
 
   if (!isOpen) return null;
 
-  const handleSaveGoogle = (e: React.FormEvent) => {
-    e.preventDefault();
-    const updated: AppConnections = {
-      ...connections,
-      google: {
-        connected: Boolean(googleToken.trim()),
-        accessToken: googleToken.trim(),
-        userEmail: googleEmail.trim() || "anurag@gmail.com",
-      },
-    };
-    setConnections(updated);
-    saveConnections(updated);
-    onConnectionsUpdated(updated);
-    showToast("Google Workspace (Gmail & Calendar) connector updated!");
+  // Filter connectors
+  const filteredConnectors = CONNECTOR_CATALOG.filter((item) => {
+    const matchesCategory = selectedCategory === "all" || item.category === selectedCategory;
+    const matchesSearch =
+      item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      item.description.toLowerCase().includes(searchQuery.toLowerCase());
+    return matchesCategory && matchesSearch;
+  });
+
+  const handleOpenConfigure = (connector: ConnectorDef) => {
+    setActiveConnector(connector);
+    const existing = allConfigs[connector.id] || {};
+    setConnectorForm(existing);
   };
 
-  const handleSaveSlack = (e: React.FormEvent) => {
+  const handleSaveConfig = (e: React.FormEvent) => {
     e.preventDefault();
-    const updated: AppConnections = {
-      ...connections,
-      slack: {
-        connected: Boolean(slackWebhook.trim()),
-        webhookUrl: slackWebhook.trim(),
-        channel: slackChannel.trim() || "#general",
-      },
-    };
-    setConnections(updated);
-    saveConnections(updated);
-    onConnectionsUpdated(updated);
-    showToast("Slack Webhook connector updated!");
+    if (!activeConnector) return;
+
+    saveConnectorConfig(activeConnector.id, connectorForm);
+    setAllConfigs(getAllSavedConfigs());
+    setToastMessage(`Saved configuration for ${activeConnector.name}!`);
+    setTimeout(() => {
+      setToastMessage(null);
+      setActiveConnector(null);
+    }, 1000);
+    if (onConnectionsUpdated) onConnectionsUpdated();
   };
 
-  const handleSaveNotion = (e: React.FormEvent) => {
-    e.preventDefault();
-    const updated: AppConnections = {
-      ...connections,
-      notion: {
-        connected: Boolean(notionKey.trim() && notionDb.trim()),
-        apiKey: notionKey.trim(),
-        databaseId: notionDb.trim(),
-      },
-    };
-    setConnections(updated);
-    saveConnections(updated);
-    onConnectionsUpdated(updated);
-    showToast("Notion Meeting Notes connector updated!");
-  };
-
-  const handleSaveHubspot = (e: React.FormEvent) => {
-    e.preventDefault();
-    const updated: AppConnections = {
-      ...connections,
-      hubspot: {
-        connected: Boolean(hubspotKey.trim()),
-        apiKey: hubspotKey.trim(),
-      },
-    };
-    setConnections(updated);
-    saveConnections(updated);
-    onConnectionsUpdated(updated);
-    showToast("HubSpot CRM connector updated!");
-  };
-
-  const showToast = (msg: string) => {
-    setToastMessage(msg);
-    setTimeout(() => setToastMessage(null), 3000);
-  };
+  const categories = [
+    { id: "all", label: "All Connectors", count: CONNECTOR_CATALOG.length },
+    { id: "communication", label: "Communication", count: 6 },
+    { id: "calendar", label: "Calendar", count: 4 },
+    { id: "notes", label: "Notes & Docs", count: 5 },
+    { id: "tasks", label: "Tasks & PM", count: 5 },
+    { id: "crm", label: "CRM & Sales", count: 5 },
+    { id: "engineering", label: "Engineering", count: 4 },
+    { id: "finance", label: "Finance & Webhooks", count: 3 },
+  ];
 
   return (
     <div className="fixed inset-0 z-50 bg-[#111827]/60 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="bg-white rounded-3xl border border-[#E5E7EB] shadow-2xl max-w-2xl w-full p-6 sm:p-7 space-y-6 animate-in fade-in zoom-in-95 duration-150 max-h-[90vh] overflow-y-auto">
+      <div className="bg-white rounded-3xl border border-[#E5E7EB] shadow-2xl max-w-3xl w-full p-6 sm:p-7 space-y-5 animate-in fade-in zoom-in-95 duration-150 max-h-[90vh] overflow-y-auto">
         
         {/* Header */}
-        <div className="flex items-center justify-between pb-4 border-b border-[#E5E7EB]">
+        <div className="flex items-center justify-between pb-3 border-b border-[#E5E7EB]">
           <div className="flex items-center space-x-3">
             <div className="w-9 h-9 rounded-xl bg-[#EEF0FF] text-[#3B4BF8] flex items-center justify-center shadow-xs">
               <Link2 className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="font-bold text-lg text-[#111827]">
-                Real App Connectors Hub
-              </h3>
+              <div className="flex items-center space-x-2">
+                <h3 className="font-bold text-lg text-[#111827]">
+                  Real App Connectors Marketplace
+                </h3>
+                <span className="px-2 py-0.5 rounded-full bg-[#ECFDF5] text-[#059669] text-[11px] font-bold">
+                  32 Live Connectors
+                </span>
+              </div>
               <p className="text-xs text-[#6B7280]">
-                Connect once. Read and write directly to your real Gmail, Calendar, Slack & Notion.
+                Configure once. Debrief dispatches real emails, events, issues & tasks directly into your daily apps.
               </p>
             </div>
           </div>
@@ -158,308 +130,177 @@ export const IntegrationsModal: React.FC<IntegrationsModalProps> = ({
 
         {/* Status Toast */}
         {toastMessage && (
-          <div className="p-2.5 rounded-xl bg-[#ECFDF5] border border-[#A7F3D0] text-[#065F46] text-xs font-semibold flex items-center space-x-2">
+          <div className="p-2.5 rounded-xl bg-[#ECFDF5] border border-[#A7F3D0] text-[#065F46] text-xs font-semibold flex items-center space-x-2 animate-in fade-in">
             <CheckCircle2 className="w-4 h-4 text-[#059669]" />
             <span>{toastMessage}</span>
           </div>
         )}
 
-        {/* Tab Navigation */}
-        <div className="flex items-center space-x-2 p-1 bg-[#F3F4F6] rounded-xl text-xs font-semibold">
-          <button
-            onClick={() => setActiveTab("google")}
-            className={`flex-1 py-2 px-3 rounded-lg flex items-center justify-center space-x-1.5 transition-all ${
-              activeTab === "google"
-                ? "bg-white text-[#111827] shadow-xs"
-                : "text-[#6B7280] hover:text-[#111827]"
-            }`}
-          >
-            <Mail className="w-3.5 h-3.5 text-red-500" />
-            <span>Gmail & Calendar</span>
-            {connections.google.connected && (
-              <span className="w-2 h-2 rounded-full bg-[#10B981]"></span>
-            )}
-          </button>
+        {/* VIEW 1: Individual Connector Config Form */}
+        {activeConnector ? (
+          <div className="space-y-4 animate-in slide-in-from-right-4 duration-150">
+            <button
+              onClick={() => setActiveConnector(null)}
+              className="text-xs text-[#6B7280] hover:text-[#111827] flex items-center space-x-1 font-semibold"
+            >
+              <ArrowLeft className="w-3.5 h-3.5" />
+              <span>Back to All 32 Connectors</span>
+            </button>
 
-          <button
-            onClick={() => setActiveTab("slack")}
-            className={`flex-1 py-2 px-3 rounded-lg flex items-center justify-center space-x-1.5 transition-all ${
-              activeTab === "slack"
-                ? "bg-white text-[#111827] shadow-xs"
-                : "text-[#6B7280] hover:text-[#111827]"
-            }`}
-          >
-            <MessageSquare className="w-3.5 h-3.5 text-emerald-600" />
-            <span>Slack</span>
-            {connections.slack.connected && (
-              <span className="w-2 h-2 rounded-full bg-[#10B981]"></span>
-            )}
-          </button>
-
-          <button
-            onClick={() => setActiveTab("notion")}
-            className={`flex-1 py-2 px-3 rounded-lg flex items-center justify-center space-x-1.5 transition-all ${
-              activeTab === "notion"
-                ? "bg-white text-[#111827] shadow-xs"
-                : "text-[#6B7280] hover:text-[#111827]"
-            }`}
-          >
-            <FileText className="w-3.5 h-3.5 text-gray-800" />
-            <span>Notion</span>
-            {connections.notion.connected && (
-              <span className="w-2 h-2 rounded-full bg-[#10B981]"></span>
-            )}
-          </button>
-
-          <button
-            onClick={() => setActiveTab("hubspot")}
-            className={`flex-1 py-2 px-3 rounded-lg flex items-center justify-center space-x-1.5 transition-all ${
-              activeTab === "hubspot"
-                ? "bg-white text-[#111827] shadow-xs"
-                : "text-[#6B7280] hover:text-[#111827]"
-            }`}
-          >
-            <Building2 className="w-3.5 h-3.5 text-orange-500" />
-            <span>HubSpot</span>
-            {connections.hubspot.connected && (
-              <span className="w-2 h-2 rounded-full bg-[#10B981]"></span>
-            )}
-          </button>
-        </div>
-
-        {/* TAB 1: GOOGLE (GMAIL & CALENDAR) */}
-        {activeTab === "google" && (
-          <form onSubmit={handleSaveGoogle} className="space-y-4">
-            <div className="p-4 rounded-2xl bg-[#F9FAFB] border border-[#E5E7EB] space-y-3">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h4 className="font-bold text-sm text-[#111827]">
-                    Google Workspace Real API Connector
-                  </h4>
-                  <p className="text-xs text-[#6B7280]">
-                    Direct read/write access to Gmail and Google Calendar
-                  </p>
+            <form onSubmit={handleSaveConfig} className="p-5 rounded-2xl bg-[#F9FAFB] border border-[#E5E7EB] space-y-4">
+              <div className="flex items-center justify-between pb-3 border-b border-[#E5E7EB]">
+                <div className="flex items-center space-x-3">
+                  <div
+                    style={{ backgroundColor: activeConnector.color }}
+                    className="w-10 h-10 rounded-xl text-white flex items-center justify-center font-bold text-sm shadow-xs"
+                  >
+                    {activeConnector.name.charAt(0)}
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-base text-[#111827]">
+                      {activeConnector.name}
+                    </h4>
+                    <p className="text-xs text-[#6B7280]">{activeConnector.description}</p>
+                  </div>
                 </div>
-                <span className={`px-2.5 py-0.5 rounded-full text-xs font-semibold ${
-                  connections.google.connected
-                    ? "bg-[#ECFDF5] text-[#059669]"
-                    : "bg-gray-100 text-gray-600"
-                }`}>
-                  {connections.google.connected ? "Real API Active" : "1-Click Web Fallback Ready"}
+
+                <span className="text-[11px] font-mono text-[#6B7280] bg-white px-2 py-1 rounded border border-[#E5E7EB]">
+                  {activeConnector.authType.toUpperCase()}
                 </span>
               </div>
 
-              <div className="space-y-2 text-xs">
-                <div>
-                  <label className="font-semibold text-[#374151] block mb-1">
-                    Your Gmail Account:
-                  </label>
-                  <input
-                    type="email"
-                    value={googleEmail}
-                    onChange={(e) => setGoogleEmail(e.target.value)}
-                    placeholder="e.g. yourname@gmail.com"
-                    className="w-full px-3 py-2 rounded-xl border border-[#D1D5DB] text-xs font-medium focus:outline-none focus:border-[#3B4BF8]"
-                  />
+              {activeConnector.fields.length === 0 ? (
+                <div className="p-3 bg-white rounded-xl border border-[#E5E7EB] text-xs text-[#4B5563]">
+                  ✅ This connector operates via standardized local protocols (.ICS or OS deep link) and requires no API keys!
                 </div>
+              ) : (
+                <div className="space-y-3">
+                  {activeConnector.fields.map((f) => (
+                    <div key={f.key} className="space-y-1">
+                      <label className="text-xs font-semibold text-[#374151] block">
+                        {f.label}
+                      </label>
+                      <input
+                        type={f.type}
+                        value={connectorForm[f.key] || ""}
+                        onChange={(e) =>
+                          setConnectorForm({ ...connectorForm, [f.key]: e.target.value })
+                        }
+                        placeholder={f.placeholder}
+                        className="w-full px-3.5 py-2 rounded-xl bg-white border border-[#D1D5DB] text-xs font-medium focus:outline-none focus:border-[#3B4BF8]"
+                      />
+                    </div>
+                  ))}
+                </div>
+              )}
 
-                <div>
-                  <label className="font-semibold text-[#374151] block mb-1">
-                    Google OAuth Access Token (Optional for direct silent sending):
-                  </label>
-                  <input
-                    type="password"
-                    value={googleToken}
-                    onChange={(e) => setGoogleToken(e.target.value)}
-                    placeholder="Bearer ya29.a0..."
-                    className="w-full px-3 py-2 rounded-xl border border-[#D1D5DB] text-xs font-mono focus:outline-none focus:border-[#3B4BF8]"
-                  />
-                  <p className="text-[11px] text-[#9CA3AF] mt-1">
-                    💡 If left blank, Debrief automatically uses instant 1-click verified deep links into Gmail and Google Calendar with pre-populated drafts and attendees.
-                  </p>
-                </div>
+              <div className="flex items-center justify-end space-x-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setActiveConnector(null)}
+                  className="px-4 py-2 rounded-xl text-xs font-semibold text-[#6B7280] hover:text-[#111827]"
+                >
+                  Cancel
+                </button>
+
+                <button
+                  type="submit"
+                  className="px-5 py-2 rounded-xl bg-[#3B4BF8] hover:bg-[#2B3BE5] text-white text-xs font-semibold shadow-sm flex items-center space-x-1.5"
+                >
+                  <Save className="w-3.5 h-3.5" />
+                  <span>Save {activeConnector.name} Connector</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        ) : (
+          /* VIEW 2: 32 Connectors Marketplace Grid */
+          <div className="space-y-4">
+            
+            {/* Search and Filters */}
+            <div className="flex flex-col sm:flex-row items-center gap-3">
+              <div className="relative flex-1 w-full">
+                <Search className="w-4 h-4 text-[#9CA3AF] absolute left-3.5 top-2.5 pointer-events-none" />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search 32 apps (e.g. Gmail, Slack, WhatsApp, GitHub, Notion, Stripe)..."
+                  className="w-full pl-9 pr-4 py-2 rounded-xl bg-[#F9FAFB] border border-[#E5E7EB] text-xs font-medium focus:outline-none focus:border-[#3B4BF8] focus:bg-white"
+                />
               </div>
 
-              <button
-                type="submit"
-                className="w-full py-2.5 rounded-xl bg-[#3B4BF8] hover:bg-[#2B3BE5] text-white text-xs font-semibold shadow-sm flex items-center justify-center space-x-1.5"
-              >
-                <Save className="w-3.5 h-3.5" />
-                <span>Save Google Connector</span>
-              </button>
+              <div className="flex items-center space-x-1 overflow-x-auto w-full sm:w-auto pb-1 sm:pb-0">
+                <select
+                  value={selectedCategory}
+                  onChange={(e) => setSelectedCategory(e.target.value)}
+                  className="px-3 py-2 rounded-xl bg-[#F9FAFB] border border-[#E5E7EB] text-xs font-semibold text-[#374151] focus:outline-none cursor-pointer"
+                >
+                  {categories.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.label} ({c.count})
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
-          </form>
-        )}
 
-        {/* TAB 2: SLACK */}
-        {activeTab === "slack" && (
-          <form onSubmit={handleSaveSlack} className="space-y-4">
-            <div className="p-4 rounded-2xl bg-[#F9FAFB] border border-[#E5E7EB] space-y-3">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h4 className="font-bold text-sm text-[#111827]">
-                    Slack Real Webhook Connector
-                  </h4>
-                  <p className="text-xs text-[#6B7280]">
-                    Directly posts teammate delegation pings to your Slack channel
-                  </p>
-                </div>
-                <span className={`px-2.5 py-0.5 rounded-full text-xs font-semibold ${
-                  connections.slack.connected ? "bg-[#ECFDF5] text-[#059669]" : "bg-gray-100 text-gray-600"
-                }`}>
-                  {connections.slack.connected ? "Connected" : "Not connected"}
-                </span>
-              </div>
+            {/* 32 Connectors Card Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[50vh] overflow-y-auto pr-1">
+              {filteredConnectors.map((c) => {
+                const isConn = isConnectorConfigured(c.id);
+                return (
+                  <div
+                    key={c.id}
+                    onClick={() => handleOpenConfigure(c)}
+                    className="p-3.5 rounded-2xl border border-[#E5E7EB] bg-[#FFFFFF] hover:border-[#3B4BF8]/50 hover:bg-[#F9FAFB] cursor-pointer transition-all flex items-center justify-between group shadow-2xs"
+                  >
+                    <div className="flex items-center space-x-3 min-w-0">
+                      <div
+                        style={{ backgroundColor: c.color }}
+                        className="w-9 h-9 rounded-xl text-white flex items-center justify-center font-bold text-xs flex-shrink-0 shadow-2xs"
+                      >
+                        {c.name.charAt(0)}
+                      </div>
+                      <div className="min-w-0">
+                        <div className="flex items-center space-x-2">
+                          <h4 className="font-bold text-xs text-[#111827] group-hover:text-[#3B4BF8] transition-colors truncate">
+                            {c.name}
+                          </h4>
+                          {isConn ? (
+                            <span className="w-2 h-2 rounded-full bg-[#10B981] flex-shrink-0" title="Connected"></span>
+                          ) : null}
+                        </div>
+                        <p className="text-[11px] text-[#6B7280] truncate leading-normal">
+                          {c.description}
+                        </p>
+                      </div>
+                    </div>
 
-              <div className="space-y-2 text-xs">
-                <div>
-                  <label className="font-semibold text-[#374151] block mb-1">
-                    Slack Incoming Webhook URL:
-                  </label>
-                  <input
-                    type="url"
-                    value={slackWebhook}
-                    onChange={(e) => setSlackWebhook(e.target.value)}
-                    placeholder="https://hooks.slack.com/services/T.../B.../..."
-                    className="w-full px-3 py-2 rounded-xl border border-[#D1D5DB] text-xs font-mono focus:outline-none focus:border-[#3B4BF8]"
-                  />
-                </div>
-
-                <div>
-                  <label className="font-semibold text-[#374151] block mb-1">
-                    Default Channel / Ping:
-                  </label>
-                  <input
-                    type="text"
-                    value={slackChannel}
-                    onChange={(e) => setSlackChannel(e.target.value)}
-                    placeholder="#general or @anurag"
-                    className="w-full px-3 py-2 rounded-xl border border-[#D1D5DB] text-xs font-medium focus:outline-none focus:border-[#3B4BF8]"
-                  />
-                </div>
-              </div>
-
-              <button
-                type="submit"
-                className="w-full py-2.5 rounded-xl bg-[#3B4BF8] hover:bg-[#2B3BE5] text-white text-xs font-semibold shadow-sm flex items-center justify-center space-x-1.5"
-              >
-                <Save className="w-3.5 h-3.5" />
-                <span>Save Slack Connector</span>
-              </button>
+                    <div className="flex-shrink-0 ml-2">
+                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${
+                        isConn ? "bg-[#ECFDF5] text-[#059669]" : "bg-gray-100 text-gray-600 group-hover:bg-[#EEF0FF] group-hover:text-[#3B4BF8]"
+                      }`}>
+                        {isConn ? "Connected" : "Connect"}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
-          </form>
-        )}
 
-        {/* TAB 3: NOTION */}
-        {activeTab === "notion" && (
-          <form onSubmit={handleSaveNotion} className="space-y-4">
-            <div className="p-4 rounded-2xl bg-[#F9FAFB] border border-[#E5E7EB] space-y-3">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h4 className="font-bold text-sm text-[#111827]">
-                    Notion Real Database Connector
-                  </h4>
-                  <p className="text-xs text-[#6B7280]">
-                    Creates real meeting pages directly inside your Notion database
-                  </p>
-                </div>
-                <span className={`px-2.5 py-0.5 rounded-full text-xs font-semibold ${
-                  connections.notion.connected ? "bg-[#ECFDF5] text-[#059669]" : "bg-gray-100 text-gray-600"
-                }`}>
-                  {connections.notion.connected ? "Connected" : "Not connected"}
-                </span>
-              </div>
-
-              <div className="space-y-2 text-xs">
-                <div>
-                  <label className="font-semibold text-[#374151] block mb-1">
-                    Notion Integration Token:
-                  </label>
-                  <input
-                    type="password"
-                    value={notionKey}
-                    onChange={(e) => setNotionKey(e.target.value)}
-                    placeholder="secret_..."
-                    className="w-full px-3 py-2 rounded-xl border border-[#D1D5DB] text-xs font-mono focus:outline-none focus:border-[#3B4BF8]"
-                  />
-                </div>
-
-                <div>
-                  <label className="font-semibold text-[#374151] block mb-1">
-                    Notion Database ID:
-                  </label>
-                  <input
-                    type="text"
-                    value={notionDb}
-                    onChange={(e) => setNotionDb(e.target.value)}
-                    placeholder="e.g. 1a2b3c4d5e6f..."
-                    className="w-full px-3 py-2 rounded-xl border border-[#D1D5DB] text-xs font-mono focus:outline-none focus:border-[#3B4BF8]"
-                  />
-                </div>
-              </div>
-
-              <button
-                type="submit"
-                className="w-full py-2.5 rounded-xl bg-[#3B4BF8] hover:bg-[#2B3BE5] text-white text-xs font-semibold shadow-sm flex items-center justify-center space-x-1.5"
-              >
-                <Save className="w-3.5 h-3.5" />
-                <span>Save Notion Connector</span>
-              </button>
-            </div>
-          </form>
-        )}
-
-        {/* TAB 4: HUBSPOT */}
-        {activeTab === "hubspot" && (
-          <form onSubmit={handleSaveHubspot} className="space-y-4">
-            <div className="p-4 rounded-2xl bg-[#F9FAFB] border border-[#E5E7EB] space-y-3">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h4 className="font-bold text-sm text-[#111827]">
-                    HubSpot CRM Connector
-                  </h4>
-                  <p className="text-xs text-[#6B7280]">
-                    Direct deal pipeline and contact milestone synchronization
-                  </p>
-                </div>
-                <span className={`px-2.5 py-0.5 rounded-full text-xs font-semibold ${
-                  connections.hubspot.connected ? "bg-[#ECFDF5] text-[#059669]" : "bg-gray-100 text-gray-600"
-                }`}>
-                  {connections.hubspot.connected ? "Connected" : "Not connected"}
-                </span>
-              </div>
-
-              <div className="space-y-2 text-xs">
-                <div>
-                  <label className="font-semibold text-[#374151] block mb-1">
-                    HubSpot Private App Access Token:
-                  </label>
-                  <input
-                    type="password"
-                    value={hubspotKey}
-                    onChange={(e) => setHubspotKey(e.target.value)}
-                    placeholder="pat-na1-..."
-                    className="w-full px-3 py-2 rounded-xl border border-[#D1D5DB] text-xs font-mono focus:outline-none focus:border-[#3B4BF8]"
-                  />
-                </div>
-              </div>
-
-              <button
-                type="submit"
-                className="w-full py-2.5 rounded-xl bg-[#3B4BF8] hover:bg-[#2B3BE5] text-white text-xs font-semibold shadow-sm flex items-center justify-center space-x-1.5"
-              >
-                <Save className="w-3.5 h-3.5" />
-                <span>Save HubSpot Connector</span>
-              </button>
-            </div>
-          </form>
+          </div>
         )}
 
         {/* Footer */}
-        <div className="pt-2 flex items-center justify-end border-t border-[#E5E7EB]">
+        <div className="pt-2 flex items-center justify-between border-t border-[#E5E7EB] text-xs text-[#6B7280]">
+          <span>
+            Connected to <strong>{Object.keys(allConfigs).length}</strong> of 32 real applications
+          </span>
+
           <button
             onClick={onClose}
-            className="px-5 py-2.5 rounded-xl bg-[#111827] hover:bg-black text-white text-xs font-semibold shadow-sm"
+            className="px-5 py-2.5 rounded-xl bg-[#111827] hover:bg-black text-white text-xs font-semibold shadow-sm transition-all"
           >
             Done
           </button>

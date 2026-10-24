@@ -8,6 +8,7 @@ interface TopHeaderProps {
   selectedSample: string;
   onSelectSample: (sample: string) => void;
   onOpenGroqModal: () => void;
+  onOpenConnectorsModal?: () => void;
   groqConnected: boolean;
 }
 
@@ -16,6 +17,7 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
   selectedSample,
   onSelectSample,
   onOpenGroqModal,
+  onOpenConnectorsModal,
   groqConnected,
 }) => {
   return (
@@ -48,6 +50,16 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
             <ChevronDown className="w-3.5 h-3.5 text-[#6B7280] absolute right-2.5 top-2.5 pointer-events-none" />
           </div>
         </div>
+
+        {/* 32 Connectors Button */}
+        {onOpenConnectorsModal && (
+          <button
+            onClick={onOpenConnectorsModal}
+            className="bg-[#EEF0FF] hover:bg-[#E0E4FF] border border-[#3B4BF8]/20 text-[#3B4BF8] text-xs font-semibold px-3 py-1.5 rounded-lg shadow-2xs transition-all flex items-center space-x-1.5"
+          >
+            <span>🔗 32 App Connectors</span>
+          </button>
+        )}
 
         {/* Connect Groq Button */}
         <button

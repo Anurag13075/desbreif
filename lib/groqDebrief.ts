@@ -275,7 +275,7 @@ export async function processDebriefVoiceRamble(
 
     let activeModel = isXaiGrok
       ? "grok-2-latest"
-      : (clientModel || "openai/gpt-oss-20b");
+      : "llama-3.3-70b-versatile";
 
     try {
       let response = await fetch(endpoint, {

@@ -421,6 +421,7 @@ export default function DebriefApp() {
               selectedSample={selectedSample}
               onSelectSample={handleSelectSample}
               onOpenGroqModal={() => setIsSettingsOpen(true)}
+              onOpenConnectorsModal={() => setIsIntegrationsModalOpen(true)}
               groqConnected={isGroqConnected}
             />
 
