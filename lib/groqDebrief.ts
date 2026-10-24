@@ -240,10 +240,10 @@ ${speakerName}`,
 export async function processDebriefVoiceRamble(
   request: GroqDebriefRequest
 ): Promise<{ result: DebriefResult; usedGroqAI: boolean }> {
-  const { apiKey: rawApiKey, model: clientModel, transcript, speakerName = "Anurag Sharma" } = request;
+  const { apiKey: rawApiKey, model: clientModel = "openai/gpt-oss-20b", transcript, speakerName = "Anurag Sharma" } = request;
   const apiKey = (rawApiKey || "").trim();
 
-  // 1. Try our Next.js API route first (which reads server-side GROQ_API_KEY / GROK_API_KEY from Vercel)
+  // 1. Try our Next.js API route first (which reads server-side GROQ_API_KEY from Vercel)
   try {
     const apiRouteRes = await fetch("/api/debrief", {
       method: "POST",
@@ -266,17 +266,16 @@ export async function processDebriefVoiceRamble(
     // API route might not be deployed yet on static preview
   }
 
-  // 2. Direct client fallback with multi-provider detection (GroqCloud vs xAI Grok)
+  // 2. Direct client fallback with base endpoint https://api.groq.com/openai/v1/chat/completions
   if (apiKey && (apiKey.startsWith("gsk_") || apiKey.startsWith("xai-"))) {
-    const isXaiGrok = apiKey.startsWith("xai-") || (clientModel && clientModel.includes("grok"));
+    const isXaiGrok = apiKey.startsWith("xai-");
     const endpoint = isXaiGrok
       ? "https://api.x.ai/v1/chat/completions"
       : "https://api.groq.com/openai/v1/chat/completions";
 
-    // Active models only
     let activeModel = isXaiGrok
-      ? (clientModel && clientModel.includes("grok") ? clientModel : "grok-2-latest")
-      : (clientModel && ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"].includes(clientModel) ? clientModel : "llama-3.3-70b-versatile");
+      ? "grok-2-latest"
+      : (clientModel || "openai/gpt-oss-20b");
 
     try {
       let response = await fetch(endpoint, {
@@ -299,9 +298,9 @@ export async function processDebriefVoiceRamble(
         }),
       });
 
-      // If 404 (model deprecated or not found on Groq), retry with llama-3.1-8b-instant
-      if (response.status === 404 && !isXaiGrok) {
-        activeModel = "llama-3.1-8b-instant";
+      // If 404/400 (model issue), fallback to llama-3.3-70b-versatile or llama-3.1-8b-instant on Groq
+      if (!response.ok && !isXaiGrok) {
+        activeModel = "llama-3.3-70b-versatile";
         response = await fetch(endpoint, {
           method: "POST",
           headers: {
@@ -321,6 +320,29 @@ export async function processDebriefVoiceRamble(
             temperature: 0.2,
           }),
         });
+
+        if (!response.ok) {
+          activeModel = "llama-3.1-8b-instant";
+          response = await fetch(endpoint, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${apiKey}`,
+            },
+            body: JSON.stringify({
+              model: activeModel,
+              messages: [
+                { role: "system", content: SYSTEM_PROMPT },
+                {
+                  role: "user",
+                  content: `Voice Ramble / Prompt from ${speakerName}: "${transcript}"`,
+                },
+              ],
+              response_format: { type: "json_object" },
+              temperature: 0.2,
+            }),
+          });
+        }
       }
 
       if (response.ok) {

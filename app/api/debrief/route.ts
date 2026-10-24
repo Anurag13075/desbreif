@@ -64,12 +64,8 @@ Return strict, valid JSON with this exact structure:
   }
 }`;
 
-// Valid active models (excludes deprecated llama3-70b-8192, mixtral, etc.)
-const ACTIVE_GROQ_MODELS = [
-  "llama-3.3-70b-versatile",
-  "llama-3.1-8b-instant",
-  "gemma2-9b-it",
-];
+const DEFAULT_MODEL = "openai/gpt-oss-20b";
+const BASE_GROQ_URL = "https://api.groq.com/openai/v1/chat/completions";
 
 export async function POST(req: NextRequest) {
   try {
@@ -102,25 +98,10 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Determine provider: xAI Grok vs Groq Cloud
-    const isXaiGrok = apiKey.startsWith("xai-") || (clientModel && clientModel.includes("grok"));
-    
-    let apiUrl = "https://api.groq.com/openai/v1/chat/completions";
-    let targetModel = "llama-3.3-70b-versatile";
+    let apiUrl = BASE_GROQ_URL;
+    let targetModel = clientModel || DEFAULT_MODEL;
 
-    if (isXaiGrok) {
-      apiUrl = "https://api.x.ai/v1/chat/completions";
-      targetModel = clientModel && clientModel.includes("grok") ? clientModel : "grok-2-latest";
-    } else {
-      // For Groq Cloud: ensure we use an active model, never deprecated llama3-70b-8192
-      if (clientModel && ACTIVE_GROQ_MODELS.includes(clientModel)) {
-        targetModel = clientModel;
-      } else {
-        targetModel = "llama-3.3-70b-versatile";
-      }
-    }
-
-    // Call API
+    // Call Groq endpoint: https://api.groq.com/openai/v1/chat/completions
     let groqResponse = await fetch(apiUrl, {
       method: "POST",
       headers: {
@@ -141,10 +122,10 @@ export async function POST(req: NextRequest) {
       }),
     });
 
-    // If 404 Model Not Found and not xAI, retry with ultra-reliable llama-3.1-8b-instant
-    if (groqResponse.status === 404 && !isXaiGrok) {
-      console.warn(`Model ${targetModel} returned 404. Retrying with llama-3.1-8b-instant...`);
-      targetModel = "llama-3.1-8b-instant";
+    // If model not found or unavailable, try fallback models on Groq
+    if (groqResponse.status === 404 || groqResponse.status === 400) {
+      console.warn(`Model ${targetModel} returned ${groqResponse.status}. Retrying with llama-3.3-70b-versatile...`);
+      targetModel = "llama-3.3-70b-versatile";
       groqResponse = await fetch(apiUrl, {
         method: "POST",
         headers: {
@@ -164,6 +145,29 @@ export async function POST(req: NextRequest) {
           temperature: 0.2,
         }),
       });
+
+      if (!groqResponse.ok) {
+        targetModel = "llama-3.1-8b-instant";
+        groqResponse = await fetch(apiUrl, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify({
+            model: targetModel,
+            messages: [
+              { role: "system", content: SYSTEM_PROMPT },
+              {
+                role: "user",
+                content: `User instruction / Voice debrief from ${speakerName}:\n"""\n${transcript}\n"""`,
+              },
+            ],
+            response_format: { type: "json_object" },
+            temperature: 0.2,
+          }),
+        });
+      }
     }
 
     if (!groqResponse.ok) {
@@ -183,7 +187,7 @@ export async function POST(req: NextRequest) {
       success: true,
       data: parsedData,
       modelUsed: targetModel,
-      provider: isXaiGrok ? "xAI Grok" : "Groq LPU",
+      endpointUsed: apiUrl,
       usedGroqAI: true,
     });
   } catch (error: any) {
@@ -201,14 +205,10 @@ export async function GET() {
     (process.env.NEXT_PUBLIC_GROQ_API_KEY && process.env.NEXT_PUBLIC_GROQ_API_KEY.startsWith("gsk_"))
   );
 
-  const hasGrok = Boolean(
-    (process.env.XAI_API_KEY && process.env.XAI_API_KEY.startsWith("xai-")) ||
-    (process.env.GROK_API_KEY && process.env.GROK_API_KEY.startsWith("xai-"))
-  );
-
   return NextResponse.json({
     status: "online",
-    groqConfiguredOnServer: hasGroq || hasGrok,
-    provider: hasGrok ? "xAI Grok" : hasGroq ? "Groq LPU" : "None",
+    groqConfiguredOnServer: hasGroq,
+    defaultModel: DEFAULT_MODEL,
+    baseEndpoint: "https://api.groq.com/openai/v1",
   });
 }
