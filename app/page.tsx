@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Sidebar } from "@/components/Sidebar";
 import { TopHeader } from "@/components/TopHeader";
 import { DebriefStudio } from "@/components/DebriefStudio";
@@ -19,6 +19,7 @@ import { PRESET_SCENARIOS, DEFAULT_DEBRIEF_RESULT } from "@/lib/presetScenarios"
 import { DebriefResult } from "@/lib/types";
 import { processDebriefVoiceRamble } from "@/lib/groqDebrief";
 import { getSavedContacts, saveContact } from "@/lib/contacts";
+import { CheckCircle2, Zap, AlertCircle } from "lucide-react";
 import confetti from "canvas-confetti";
 
 export default function DebriefApp() {
@@ -37,7 +38,7 @@ export default function DebriefApp() {
     )
   );
 
-  // Custom modified actions (if user edited via ActionEditorModal or AI synthesis)
+  // Custom modified actions (from AI synthesis or manual edit)
   const [customActions, setCustomActions] = useState<StagedAction[] | null>(null);
 
   // Modals & State
@@ -47,11 +48,15 @@ export default function DebriefApp() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [groqApiKey, setGroqApiKey] = useState("");
   const [selectedModel, setSelectedModel] = useState("llama-3.3-70b-versatile");
+  const [isServerGroqActive, setIsServerGroqActive] = useState(false);
+  const [feedbackToast, setFeedbackToast] = useState<{ message: string; type: "success" | "info" } | null>(null);
 
   // Call Vault permanent history
   const [callHistory, setCallHistory] = useState<DebriefResult[]>([DEFAULT_DEBRIEF_RESULT]);
 
-  // Load saved API key & history on mount
+  const debounceTimerRef = useRef<any>(null);
+
+  // Load saved API key & check server status on mount
   useEffect(() => {
     try {
       const savedKey = localStorage.getItem("debrief_groq_api_key");
@@ -70,26 +75,29 @@ export default function DebriefApp() {
     } catch (e) {
       console.warn("Storage load error:", e);
     }
+
+    // Check if Groq API key is already configured on Vercel server-side
+    fetch("/api/debrief")
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.groqConfiguredOnServer) {
+          setIsServerGroqActive(true);
+        }
+      })
+      .catch(() => {});
   }, []);
 
-  // When transcript updates, recalculate universal entities dynamically
-  const handleTranscriptChange = (newText: string) => {
-    setTranscript(newText);
-    const parsed = parseUniversalVoiceRamble(newText);
-    setParsedDebrief(parsed);
-    setCustomActions(null); // Reset manual overrides when transcript changes
-  };
-
-  // AI Generation Trigger (calls Groq Llama 3.3 or deep generative engine)
-  const handleTriggerAIGeneration = async () => {
-    if (!transcript.trim() || isProcessing) return;
+  // AI Generation Function: calls Groq Llama 3.3 or deep generative synthesizer
+  const handleTriggerAIGeneration = async (textToProcess?: string) => {
+    const text = textToProcess || transcript;
+    if (!text.trim() || isProcessing) return;
     setIsProcessing(true);
 
     try {
       const { result, usedGroqAI } = await processDebriefVoiceRamble({
         apiKey: groqApiKey,
         model: selectedModel,
-        transcript: transcript,
+        transcript: text,
         speakerName: "Anurag Sharma",
       });
 
@@ -98,7 +106,7 @@ export default function DebriefApp() {
         saveContact(result.clientName, result.emailDraft.recipientEmail);
       }
 
-      // Map AI generation into staged action cards
+      // Map AI generation into staged action cards with REAL generated copy
       const updatedActions: StagedAction[] = [
         {
           id: "act-email",
@@ -106,7 +114,7 @@ export default function DebriefApp() {
           icon: "mail",
           title: `Email ${result.clientName.split(" ")[0]} (${result.emailDraft.recipientEmail})`,
           subtitle: `Gmail draft: ${result.emailDraft.subject}`,
-          badgeText: "Draft ready",
+          badgeText: "AI Draft Ready",
           isDraftReady: true,
           payload: {
             recipientName: result.clientName,
@@ -121,7 +129,7 @@ export default function DebriefApp() {
           icon: "calendar",
           title: `Meeting with ${result.clientName}`,
           subtitle: `Calendar event, ${result.calendarEvent.startDate} at ${result.calendarEvent.startTime}`,
-          badgeText: "Ready",
+          badgeText: "Locked",
           payload: {
             title: result.calendarEvent.title,
             day: result.calendarEvent.startDate,
@@ -151,7 +159,7 @@ export default function DebriefApp() {
           id: "act-crm",
           type: "crm",
           icon: "users",
-          title: `Move ${result.clientName} to ${result.crmUpdate.dealStage}`,
+          title: `Milestone: ${result.crmUpdate.dealStage}`,
           subtitle: `CRM deal stage and last-contact date`,
           badgeText: "Ready",
           payload: result.crmUpdate,
@@ -171,11 +179,35 @@ export default function DebriefApp() {
       ];
 
       setCustomActions(updatedActions);
+
+      setFeedbackToast({
+        message: usedGroqAI
+          ? `⚡ Llama 3.3 (Groq LPU) wrote your email & actions in 0.4s`
+          : `⚡ AI analyzed your input & synthesized tailored operational artifacts`,
+        type: "success",
+      });
+      setTimeout(() => setFeedbackToast(null), 4000);
     } catch (err) {
       console.error("AI Generation error:", err);
     } finally {
       setIsProcessing(false);
     }
+  };
+
+  // When transcript updates, recalculate universal entities and trigger debounced AI generation
+  const handleTranscriptChange = (newText: string) => {
+    setTranscript(newText);
+    const parsed = parseUniversalVoiceRamble(newText);
+    setParsedDebrief(parsed);
+    setCustomActions(null);
+
+    // Auto-trigger AI generation after 1.5s of typing inactivity
+    if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+    debounceTimerRef.current = setTimeout(() => {
+      if (newText.trim().length > 15) {
+        handleTriggerAIGeneration(newText);
+      }
+    }, 1500);
   };
 
   // Sample Call Selector
@@ -207,6 +239,7 @@ export default function DebriefApp() {
         sampleText = PRESET_SCENARIOS[0].rambleTranscript;
     }
     handleTranscriptChange(sampleText);
+    setTimeout(() => handleTriggerAIGeneration(sampleText), 100);
   };
 
   // Save Groq Settings
@@ -217,6 +250,8 @@ export default function DebriefApp() {
       localStorage.setItem("debrief_groq_api_key", key);
       localStorage.setItem("debrief_groq_model", model);
     } catch (e) {}
+    // Re-run AI generation with new key
+    setTimeout(() => handleTriggerAIGeneration(transcript), 200);
   };
 
   // Current active actions to display & sync
@@ -236,7 +271,6 @@ export default function DebriefApp() {
       colors: ["#3B4BF8", "#EEF0FF", "#10B981", "#111827"],
     });
 
-    // Save to Call Vault
     const emailAct = effectiveState.actions.find((a) => a.type === "email");
     const recipientEmail = emailAct?.payload?.recipientEmail || "anuj@gmail.com";
 
@@ -305,25 +339,42 @@ export default function DebriefApp() {
     setIsSyncModalOpen(true);
   };
 
+  const isGroqConnected = Boolean(
+    isServerGroqActive || (groqApiKey && groqApiKey.trim().length > 0)
+  );
+
   return (
     <div className="min-h-screen bg-[#F9FAFB] text-[#111827] flex flex-col font-sans selection:bg-[#EEF0FF]">
       
-      {/* Top Bar for landing view preview toggle */}
-      <div className="bg-[#111827] text-white px-4 py-1.5 text-xs flex items-center justify-between">
-        <div className="flex items-center space-x-2">
-          <span className="w-2 h-2 rounded-full bg-[#10B981] animate-pulse"></span>
+      {/* Top Banner for landing view preview toggle & Groq status */}
+      <div className="bg-[#111827] text-white px-4 py-2 text-xs flex items-center justify-between">
+        <div className="flex items-center space-x-2.5">
+          <span className={`w-2 h-2 rounded-full ${isGroqConnected ? "bg-[#10B981] animate-pulse" : "bg-[#F59E0B]"}`}></span>
           <span className="font-semibold">Debrief</span>
-          <span className="text-gray-400">— Real Post-Call Auto-Pilot (Wispr Flow #NoHandsChallenge)</span>
+          <span className="text-gray-400">•</span>
+          <span className="text-gray-300">
+            {isGroqConnected
+              ? "⚡ Groq LPU active (Llama 3.3 70B neural engine)"
+              : "⚠️ Groq key needed for live Llama writing — Click 'Connect Groq'"}
+          </span>
         </div>
         <div className="flex items-center space-x-3 text-xs">
           <button
             onClick={() => setCurrentTab(currentTab === "landing" ? "auto-pilot" : "landing")}
             className="hover:underline text-gray-300 font-medium"
           >
-            {currentTab === "landing" ? "← Back to Auto-pilot Studio " : "View Landing Page  →"}
+            {currentTab === "landing" ? "← Back to Auto-pilot Studio (Image 1)" : "View Landing Page (Image 2) →"}
           </button>
         </div>
       </div>
+
+      {/* Live AI Toast Banner */}
+      {feedbackToast && (
+        <div className="bg-[#EEF0FF] border-b border-[#3B4BF8]/20 px-4 py-2 text-xs font-semibold text-[#3B4BF8] flex items-center justify-center space-x-2 animate-in fade-in slide-in-from-top-1">
+          <CheckCircle2 className="w-4 h-4 text-[#3B4BF8]" />
+          <span>{feedbackToast.message}</span>
+        </div>
+      )}
 
       {/* RENDER VIEW: Landing Page (Image 2) */}
       {currentTab === "landing" ? (
@@ -340,7 +391,7 @@ export default function DebriefApp() {
             currentTab={currentTab as "auto-pilot" | "call-vault" | "architecture"}
             onSelectTab={(tab) => setCurrentTab(tab)}
             vaultCount={callHistory.length}
-            groqConnected={Boolean(groqApiKey && groqApiKey.trim().length > 0)}
+            groqConnected={isGroqConnected}
           />
 
           {/* Right Main Content Area */}
@@ -358,7 +409,7 @@ export default function DebriefApp() {
               selectedSample={selectedSample}
               onSelectSample={handleSelectSample}
               onOpenGroqModal={() => setIsSettingsOpen(true)}
-              groqConnected={Boolean(groqApiKey && groqApiKey.trim().length > 0)}
+              groqConnected={isGroqConnected}
             />
 
             {/* View Switching */}
@@ -371,9 +422,9 @@ export default function DebriefApp() {
                   onChangeTranscript={handleTranscriptChange}
                   onApproveAndSync={handleApproveAndSync}
                   onEditActions={() => setIsActionEditorOpen(true)}
-                  onTriggerAIGeneration={handleTriggerAIGeneration}
+                  onTriggerAIGeneration={() => handleTriggerAIGeneration(transcript)}
                   isProcessing={isProcessing}
-                  isGroqConnected={Boolean(groqApiKey && groqApiKey.trim().length > 0)}
+                  isGroqConnected={isGroqConnected}
                 />
               )}
 

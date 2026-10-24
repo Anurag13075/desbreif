@@ -235,40 +235,31 @@ ${speakerName}`,
 }
 
 /**
- * Main execution agent: calls Groq Llama 3.3 or falls back gracefully
+ * Main execution agent: calls Groq Llama 3.3 via /api/debrief (or direct Groq API)
  */
 export async function processDebriefVoiceRamble(
   request: GroqDebriefRequest
 ): Promise<{ result: DebriefResult; usedGroqAI: boolean }> {
   const { apiKey, model = "llama-3.3-70b-versatile", transcript, speakerName = "Anurag Sharma" } = request;
 
-  if (apiKey && apiKey.startsWith("gsk_")) {
-    try {
-      const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          model: model,
-          messages: [
-            { role: "system", content: SYSTEM_PROMPT },
-            {
-              role: "user",
-              content: `Voice Ramble / Prompt from ${speakerName}: "${transcript}"`,
-            },
-          ],
-          response_format: { type: "json_object" },
-          temperature: 0.2,
-        }),
-      });
+  // 1. Try our Next.js API route first (which reads server-side GROQ_API_KEY from Vercel)
+  try {
+    const apiRouteRes = await fetch("/api/debrief", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        transcript,
+        apiKey,
+        model,
+        speakerName,
+      }),
+    });
 
-      if (response.ok) {
-        const data = await response.json();
-        const parsed = JSON.parse(data.choices[0].message.content);
+    if (apiRouteRes.ok) {
+      const json = await apiRouteRes.json();
+      if (json.success && json.data) {
+        const parsed = json.data;
 
-        // Ensure real email is used
         let finalEmail = parsed.emailDraft?.recipientEmail;
         if (!finalEmail || finalEmail.includes("example.com")) {
           finalEmail = lookupContactEmail(parsed.clientName || "Partner");
@@ -312,16 +303,99 @@ export async function processDebriefVoiceRamble(
             nextStepSummary: "Follow-up demo",
           },
           teamHandoff: parsed.teamHandoff || {
-            targetPerson: "Alex",
-            role: "Legal & Operations",
-            messageSnippet: `Hey Alex, please follow up on our latest client sync.`,
+            targetPerson: "Anurag",
+            role: "Engineering",
+            messageSnippet: `Hey Anurag, please check the latest update from today's discussion.`,
+          },
+        };
+
+        return { result: debriefResult, usedGroqAI: true };
+      }
+    }
+  } catch (routeErr) {
+    console.warn("API route error, trying direct client call:", routeErr);
+  }
+
+  // 2. Direct client fallback if API key is in browser localStorage
+  if (apiKey && apiKey.startsWith("gsk_")) {
+    try {
+      const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: model,
+          messages: [
+            { role: "system", content: SYSTEM_PROMPT },
+            {
+              role: "user",
+              content: `Voice Ramble / Prompt from ${speakerName}: "${transcript}"`,
+            },
+          ],
+          response_format: { type: "json_object" },
+          temperature: 0.2,
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        const parsed = JSON.parse(data.choices[0].message.content);
+
+        let finalEmail = parsed.emailDraft?.recipientEmail;
+        if (!finalEmail || finalEmail.includes("example.com")) {
+          finalEmail = lookupContactEmail(parsed.clientName || "Partner");
+        }
+
+        const debriefResult: DebriefResult = {
+          id: `debrief_${Date.now()}`,
+          createdAt: "Just now",
+          rawTranscript: transcript,
+          durationSeconds: Math.max(15, Math.round(transcript.split(" ").length / 2.5)),
+          clientName: parsed.clientName || "Client",
+          companyName: parsed.companyName || "Organization",
+          executiveSummary: parsed.executiveSummary || "Call concluded successfully.",
+          keyDecisions: parsed.keyDecisions || ["Key milestones ratified."],
+          sentiment: parsed.sentiment || "positive",
+          emailDraft: {
+            recipientName: parsed.emailDraft?.recipientName || parsed.clientName || "Client",
+            recipientEmail: finalEmail,
+            subject: parsed.emailDraft?.subject || `Follow-up: Meeting Recap`,
+            body: parsed.emailDraft?.body || `Hi ${parsed.clientName},\n\nGreat speaking with you today!`,
+            attachmentsMentioned: parsed.emailDraft?.attachmentsMentioned || [],
+          },
+          calendarEvent: {
+            title: parsed.calendarEvent?.title || `Follow-up Demo`,
+            startDate: parsed.calendarEvent?.startDate || "Friday",
+            startTime: parsed.calendarEvent?.startTime || "15:00",
+            endTime: parsed.calendarEvent?.endTime || "15:45",
+            durationMinutes: parsed.calendarEvent?.durationMinutes || 45,
+            location: parsed.calendarEvent?.location || "Google Meet",
+            attendees: [finalEmail, "you@domain.com"],
+            description: parsed.calendarEvent?.description || "Follow-up sync",
+          },
+          actionItems: parsed.actionItems || [],
+          crmUpdate: parsed.crmUpdate || {
+            clientName: parsed.clientName || "Client",
+            companyName: parsed.companyName || "Organization",
+            dealStage: "Pricing Approved",
+            dealValue: "$24,000 / year",
+            sentiment: "positive",
+            keyDecision: "Pricing approved",
+            nextStepSummary: "Follow-up demo",
+          },
+          teamHandoff: parsed.teamHandoff || {
+            targetPerson: "Anurag",
+            role: "Engineering",
+            messageSnippet: `Hey Anurag, please check the latest update from today's discussion.`,
           },
         };
 
         return { result: debriefResult, usedGroqAI: true };
       }
     } catch (err) {
-      console.warn("Groq API error, falling back:", err);
+      console.warn("Groq API direct client error:", err);
     }
   }
 
