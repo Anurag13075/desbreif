@@ -14,6 +14,7 @@ import {
   Check,
   CheckCircle2,
   Loader2,
+  Zap,
 } from "lucide-react";
 import { ParsedDebriefState, StagedAction, AnnotatedSegment } from "@/lib/universalEntityEngine";
 
@@ -40,11 +41,35 @@ export const DebriefStudio: React.FC<DebriefStudioProps> = ({
   const [isEditingRaw, setIsEditingRaw] = useState(false);
   const [rawInputText, setRawInputText] = useState(state.rawText);
   const [hoveredActionId, setHoveredActionId] = useState<string | null>(null);
+  
+  // Standout Feature 2: Autonomous #NoHands Mode with countdown
+  const [noHandsMode, setNoHandsMode] = useState<boolean>(false);
+  const [countdown, setCountdown] = useState<number | null>(null);
+
   const recognitionRef = useRef<any>(null);
+  const countdownIntervalRef = useRef<any>(null);
 
   useEffect(() => {
     setRawInputText(state.rawText);
   }, [state.rawText]);
+
+  // Handle countdown for #NoHandsChallenge
+  useEffect(() => {
+    if (countdown === null) return;
+    if (countdown === 0) {
+      setCountdown(null);
+      onApproveAndSync();
+      return;
+    }
+
+    countdownIntervalRef.current = setTimeout(() => {
+      setCountdown((prev) => (prev !== null ? prev - 1 : null));
+    }, 1000);
+
+    return () => {
+      if (countdownIntervalRef.current) clearTimeout(countdownIntervalRef.current);
+    };
+  }, [countdown, onApproveAndSync]);
 
   // Real-time microphone dictation using Web Speech API
   const toggleRecording = () => {
@@ -53,7 +78,15 @@ export const DebriefStudio: React.FC<DebriefStudioProps> = ({
         recognitionRef.current.stop();
       }
       setIsRecording(false);
+
+      // If NoHands mode is active, trigger 5s countdown
+      if (noHandsMode) {
+        setCountdown(5);
+      }
     } else {
+      if (countdownIntervalRef.current) clearTimeout(countdownIntervalRef.current);
+      setCountdown(null);
+
       const SpeechRecognition =
         (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
@@ -75,7 +108,10 @@ export const DebriefStudio: React.FC<DebriefStudioProps> = ({
           };
 
           rec.onerror = () => setIsRecording(false);
-          rec.onend = () => setIsRecording(false);
+          rec.onend = () => {
+            setIsRecording(false);
+            if (noHandsMode) setCountdown(5);
+          };
 
           rec.start();
           recognitionRef.current = rec;
@@ -108,14 +144,55 @@ export const DebriefStudio: React.FC<DebriefStudioProps> = ({
     <div className="space-y-8">
       
       {/* Title & Subtitle (Exact typography match to Image 1) */}
-      <div className="space-y-2.5 max-w-3xl">
-        <h1 className="text-[38px] font-extrabold text-[#111827] tracking-tight leading-[1.12]">
-          Hang up the call. Everything else is done.
-        </h1>
-        <p className="text-[15px] text-[#4B5563] leading-relaxed font-normal">
-          Speak for 20 seconds after a call with Anuj, Sarah, or any client. Debrief drafts your email, books the follow-up, writes the notes and updates your CRM for you to approve.
-        </p>
+      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 max-w-7xl">
+        <div className="space-y-2.5 max-w-3xl">
+          <h1 className="text-[38px] font-extrabold text-[#111827] tracking-tight leading-[1.12]">
+            Hang up the call. Everything else is done.
+          </h1>
+          <p className="text-[15px] text-[#4B5563] leading-relaxed font-normal">
+            Speak for 20 seconds after a call with Anuj, Sarah, or any client. Debrief drafts your email, books the follow-up, writes the notes and updates your CRM for you to approve.
+          </p>
+        </div>
+
+        {/* Standout Feature 2: Autonomous #NoHands Auto-Pilot Switch */}
+        <div className="bg-white p-3 rounded-2xl border border-[#E5E7EB] shadow-xs flex items-center space-x-3 self-start md:self-auto">
+          <div className="flex items-center space-x-1.5">
+            <Zap className={`w-4 h-4 ${noHandsMode ? "text-[#3B4BF8]" : "text-gray-400"}`} />
+            <span className="text-xs font-bold text-[#111827]">#NoHands Auto-Dispatch</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setNoHandsMode(!noHandsMode);
+              if (countdown !== null) setCountdown(null);
+            }}
+            className={`w-11 h-6 flex items-center rounded-full p-1 transition-all ${
+              noHandsMode ? "bg-[#3B4BF8] justify-end" : "bg-gray-200 justify-start"
+            }`}
+          >
+            <span className="w-4 h-4 rounded-full bg-white shadow-xs block"></span>
+          </button>
+        </div>
       </div>
+
+      {/* Standout Feature 2: Visual Countdown Toast */}
+      {countdown !== null && (
+        <div className="p-3 rounded-2xl bg-[#EEF0FF] border border-[#3B4BF8]/40 flex items-center justify-between text-xs font-semibold text-[#3B4BF8] animate-in slide-in-from-top-2">
+          <div className="flex items-center space-x-2">
+            <span className="w-2.5 h-2.5 rounded-full bg-[#3B4BF8] animate-ping"></span>
+            <span>
+              🚀 <strong>#NoHands Challenge:</strong> Auto-dispatching across 5 apps in <strong>{countdown}s</strong>...
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setCountdown(null)}
+            className="px-3 py-1 rounded-lg bg-white border border-[#D1D5DB] text-[#111827] text-[11px] font-bold hover:bg-gray-50 shadow-2xs"
+          >
+            Cancel Auto-Dispatch
+          </button>
+        </div>
+      )}
 
       {/* 2-Card Container Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
@@ -267,7 +344,7 @@ export const DebriefStudio: React.FC<DebriefStudioProps> = ({
                 {state.actions.length} actions ready
               </span>
               <span className="text-[10px] font-semibold text-[#059669] bg-[#ECFDF5] px-2 py-0.5 rounded-full">
-                Real Addresses
+                Real Connectors
               </span>
             </div>
             <span className="text-[#9CA3AF] text-xs">

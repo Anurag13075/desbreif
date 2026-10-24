@@ -10,6 +10,7 @@ import { ArchitectureView } from "@/components/ArchitectureView";
 import { SyncExecutionModal } from "@/components/SyncExecutionModal";
 import { ActionEditorModal } from "@/components/ActionEditorModal";
 import { SettingsModal } from "@/components/SettingsModal";
+import { IntegrationsModal } from "@/components/IntegrationsModal";
 import {
   parseUniversalVoiceRamble,
   ParsedDebriefState,
@@ -45,6 +46,7 @@ export default function DebriefApp() {
   const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
   const [isActionEditorOpen, setIsActionEditorOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isIntegrationsModalOpen, setIsIntegrationsModalOpen] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [groqApiKey, setGroqApiKey] = useState("");
   const [selectedModel, setSelectedModel] = useState("openai/gpt-oss-20b");
@@ -364,6 +366,12 @@ export default function DebriefApp() {
         </div>
         <div className="flex items-center space-x-3 text-xs">
           <button
+            onClick={() => setIsIntegrationsModalOpen(true)}
+            className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white font-semibold transition-all flex items-center space-x-1"
+          >
+            <span>🔗 Connect Real Apps</span>
+          </button>
+          <button
             onClick={() => setCurrentTab(currentTab === "landing" ? "auto-pilot" : "landing")}
             className="hover:underline text-gray-300 font-medium"
           >
@@ -459,6 +467,7 @@ export default function DebriefApp() {
         onClose={() => setIsSyncModalOpen(false)}
         actions={effectiveState.actions}
         clientName={effectiveState.clientName}
+        onOpenConnectorsModal={() => setIsIntegrationsModalOpen(true)}
       />
 
       {/* Modal 2: Action Editor Modal */}
@@ -476,6 +485,13 @@ export default function DebriefApp() {
         apiKey={groqApiKey}
         onSaveApiKey={handleSaveApiKey}
         currentModel={selectedModel}
+      />
+
+      {/* Modal 4: Real App Connectors Hub Modal */}
+      <IntegrationsModal
+        isOpen={isIntegrationsModalOpen}
+        onClose={() => setIsIntegrationsModalOpen(false)}
+        onConnectionsUpdated={() => {}}
       />
 
     </div>
