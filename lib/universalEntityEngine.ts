@@ -1,7 +1,10 @@
 /**
  * Universal Entity & Multi-App Staging Engine
  * Parses ANY free-form post-call voice ramble into annotated entity segments and 5 real-world staged actions.
+ * Integrates real contact email lookup, explicit email extraction, and contextual email synthesis.
  */
+
+import { lookupContactEmail, lookupTeammateHandle } from "./contacts";
 
 export interface AnnotatedSegment {
   id: string;
@@ -33,7 +36,7 @@ export interface ParsedDebriefState {
 
 /**
  * Intelligent Dynamic Entity Parser
- * Detects real names, CRM deal stages, calendar times, email promises, and colleague delegations.
+ * Detects real names, actual emails, CRM deal stages, calendar times, and real action items.
  */
 export function parseUniversalVoiceRamble(text: string): ParsedDebriefState {
   const clean = text.trim();
@@ -41,40 +44,64 @@ export function parseUniversalVoiceRamble(text: string): ParsedDebriefState {
     return getEmptyState();
   }
 
-  // 1. Detect person / attendee name
+  // 1. Detect explicit email if provided in text (e.g. anuj@gmail.com, anurag@outlook.com)
+  const emailRegex = /([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/;
+  const explicitEmailMatch = clean.match(emailRegex);
+  const explicitEmail = explicitEmailMatch ? explicitEmailMatch[1] : null;
+
+  // 2. Detect person / attendee name (Anuj, Anurag, Sarah, Alex, etc.)
   let clientName = "Partner";
   const namePatterns = [
-    /(?:call with|sync with|met with|talked to|spoke with|speaking with|chat with|from)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)/i,
-    /([A-Z][a-z]+)\s+(?:approved|agreed|wanted|asked|confirmed)/i,
-    /(?:Sarah|David|Elena|Marcus|Rohan|Priya|Emily|Alex|Michael|Rachel|Jessica|Daniel)/i,
+    /(?:write an email for|email for|email to|send email to|send to)\s+([A-Za-z]+)/i,
+    /(?:call with|sync with|met with|talked to|spoke with|speaking with|chat with|from|with)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)/i,
+    /([A-Z][a-z]+)\s+(?:approved|agreed|wanted|asked|confirmed|reviewed|discussed)/i,
+    /(?:Sarah|Anuj|Anurag|David|Elena|Marcus|Rohan|Priya|Emily|Alex|Michael|Rachel|Jessica|Daniel)/i,
   ];
 
   for (const pat of namePatterns) {
     const match = clean.match(pat);
     if (match) {
       clientName = match[1] || match[0];
+      // Capitalize first letter
+      clientName = clientName.charAt(0).toUpperCase() + clientName.slice(1);
       break;
     }
   }
 
-  // 2. Detect company
-  let companyName = `${clientName}'s Team`;
-  const companyMatch = clean.match(/(?:at|from|with)\s+([A-Z][a-zA-Z0-9]+(?:\s+Corp|\s+Inc|\s+Ventures|\s+Global|\s+Technologies)?)/i);
+  // 3. Resolve Real Email Address
+  const recipientEmail = explicitEmail || lookupContactEmail(clientName);
+
+  // 4. Detect company or project context
+  let companyName = `${clientName}'s Project`;
+  const companyMatch = clean.match(/(?:at|from|with)\s+([A-Z][a-zA-Z0-9]+(?:\s+Corp|\s+Inc|\s+Ventures|\s+Global|\s+Technologies|\s+Labs)?)/i);
   if (companyMatch && companyMatch[1] && companyMatch[1].toLowerCase() !== clientName.toLowerCase()) {
     companyName = companyMatch[1];
-  } else if (clientName.toLowerCase().includes("sarah")) {
+  } else if (clientName.toLowerCase() === "sarah") {
     companyName = "Acme Corp";
-  } else if (clientName.toLowerCase().includes("david")) {
+  } else if (clientName.toLowerCase() === "david") {
     companyName = "Peak Horizon Ventures";
-  } else if (clientName.toLowerCase().includes("elena")) {
+  } else if (clientName.toLowerCase() === "elena") {
     companyName = "Finova Global";
-  } else if (clientName.toLowerCase().includes("marcus")) {
-    companyName = "TechScale Core";
-  } else if (clientName.toLowerCase().includes("rohan")) {
-    companyName = "Flipkart";
+  } else if (clientName.toLowerCase() === "anuj") {
+    companyName = "Product Engineering";
+  } else if (clientName.toLowerCase() === "anurag") {
+    companyName = "Core Platform";
   }
 
-  // 3. Detect meeting time and day
+  // 5. Detect meeting topic / subject matter
+  let meetingTopic = "Project Review & Next Steps";
+  const topicMatch = clean.match(/(?:meeting about|call about|discussion on|regarding|concerning|sync about)\s+([^,.]+)/i);
+  if (topicMatch && topicMatch[1]) {
+    meetingTopic = topicMatch[1].trim();
+  } else if (clean.toLowerCase().includes("design engineering")) {
+    meetingTopic = "Design Engineering for our Product";
+  } else if (clean.toLowerCase().includes("pricing")) {
+    meetingTopic = "Pricing Alignment & Contract Terms";
+  } else if (clean.toLowerCase().includes("migration") || clean.toLowerCase().includes("database")) {
+    meetingTopic = "Database Infrastructure & Read Replicas";
+  }
+
+  // 6. Detect meeting time and day
   let meetingDay = "Friday";
   let meetingTime = "3:00 PM";
   let meetingIsoTime = "15:00";
@@ -97,38 +124,39 @@ export function parseUniversalVoiceRamble(text: string): ParsedDebriefState {
     meetingDay = dayMatch[1].charAt(0).toUpperCase() + dayMatch[1].slice(1);
   }
 
-  // 4. Detect email deliverable (proposal, deck, pdf, contract, docs)
-  let deliverable = "proposal PDF";
-  let deliverableDue = "tomorrow at 12:00 PM";
-  const docMatch = clean.match(/(?:send|email|deliver|forward)\s+(?:her|him|them|to\s+\w+)?\s*(?:our|the)?\s*([a-zA-Z0-9\s]+?(?:pdf|proposal|deck|contract|spec|documentation|spreadsheet|pricing|invoice))/i);
+  // 7. Detect deliverable & due date
+  let deliverable = "updated deliverables & notes";
+  let deliverableDue = "tomorrow by noon";
+  const docMatch = clean.match(/(?:send|email|deliver|forward|share)\s+(?:her|him|them|to\s+\w+)?\s*(?:our|the)?\s*([a-zA-Z0-9\s]+?(?:pdf|proposal|deck|contract|spec|documentation|spreadsheet|pricing|invoice|prototype|figma|build|repo|code))/i);
   if (docMatch && docMatch[1]) {
     deliverable = docMatch[1].trim();
   }
-  const dueMatch = clean.match(/(?:by|before)\s+([a-zA-Z0-9\s]+?(?:noon|morning|evening|tomorrow|tonight|friday|monday|\d{1,2}(?::\d{2})?\s*(?:am|pm)?))/i);
+  const dueMatch = clean.match(/(?:by|before)\s+([a-zA-Z0-9\s]+?(?:noon|morning|evening|tomorrow|tonight|friday|monday|tuesday|wednesday|thursday|\d{1,2}(?::\d{2})?\s*(?:am|pm)?))/i);
   if (dueMatch && dueMatch[1]) {
     deliverableDue = dueMatch[1].trim();
   }
 
-  // 5. Detect colleague delegation (Alex, Rachel, Maya, Sam, Emily, etc.)
-  let colleague = "Alex";
-  let colleagueTask = "prepare the contract";
-  const delegateMatch = clean.match(/(?:remind|tell|ask|ping|have|assign)\s+([A-Z][a-z]+)\s+to\s+([^,.]+)/i);
+  // 8. Detect colleague delegation (Anurag, Alex, Rachel, Maya, Sam, Emily, etc.)
+  let colleague = clientName.toLowerCase() === "anuj" ? "Anurag" : "Alex";
+  let colleagueTask = "review the deliverables and prepare the update";
+  const delegateMatch = clean.match(/(?:remind|tell|ask|ping|have|assign)\s+([A-Za-z]+)\s+to\s+([^,.]+)/i);
   if (delegateMatch) {
-    colleague = delegateMatch[1];
+    colleague = delegateMatch[1].charAt(0).toUpperCase() + delegateMatch[1].slice(1);
     colleagueTask = delegateMatch[2].trim();
   } else {
-    const colMatch = clean.match(/(?:remind|tell|ask|ping)\s+([A-Z][a-z]+)/i);
+    const colMatch = clean.match(/(?:remind|tell|ask|ping)\s+([A-Za-z]+)/i);
     if (colMatch) {
-      colleague = colMatch[1];
+      colleague = colMatch[1].charAt(0).toUpperCase() + colMatch[1].slice(1);
     }
   }
 
-  // 6. Detect CRM deal stage
-  let dealStage = "Pricing approved";
-  if (clean.toLowerCase().includes("contract")) dealStage = "Contract review";
-  if (clean.toLowerCase().includes("pilot")) dealStage = "Pilot approved";
-  if (clean.toLowerCase().includes("renewal")) dealStage = "Renewal negotiation";
-  if (clean.toLowerCase().includes("approved the pricing") || clean.toLowerCase().includes("pricing")) dealStage = "Pricing approved";
+  // 9. Detect deal stage or progress milestone
+  let dealStage = "Milestone Aligned";
+  if (clean.toLowerCase().includes("pricing")) dealStage = "Pricing approved";
+  else if (clean.toLowerCase().includes("contract")) dealStage = "Contract review";
+  else if (clean.toLowerCase().includes("design engineering") || clean.toLowerCase().includes("design")) dealStage = "Design Engineering Review";
+  else if (clean.toLowerCase().includes("pilot")) dealStage = "Pilot approved";
+  else if (clean.toLowerCase().includes("renewal")) dealStage = "Renewal negotiation";
 
   // Build Annotated Segments with Inline Highlighting
   const segments = buildAnnotatedSegments(clean, {
@@ -142,74 +170,76 @@ export function parseUniversalVoiceRamble(text: string): ParsedDebriefState {
     colleagueTask,
   });
 
-  // Calculate realistic speaking duration based on word count
   const wordCount = clean.split(/\s+/).filter(Boolean).length;
   const durationSeconds = Math.max(12, Math.min(45, Math.round(wordCount / 2.3)));
 
-  // Build the 5 Staged Actions
+  // 10. Generate Contextual AI-Styled Email Body (Tailored to actual discussion)
+  const emailSubject = `Recap: ${meetingTopic} — ${clientName}`;
+  const emailBody = generateContextualEmailBody({
+    clientName,
+    companyName,
+    meetingTopic,
+    meetingDay,
+    meetingTime,
+    deliverable,
+    deliverableDue,
+    colleague,
+    colleagueTask,
+    dealStage,
+    rawText: clean,
+  });
+
+  // Build the 5 Staged Actions with REAL data and REAL recipient addresses
   const actions: StagedAction[] = [
     {
       id: "act-email",
       type: "email",
       icon: "mail",
-      title: `Email the ${deliverable} to ${clientName.split(" ")[0]}`,
-      subtitle: `Gmail draft, due ${deliverableDue}`,
+      title: `Email ${clientName.split(" ")[0]} (${recipientEmail})`,
+      subtitle: `Gmail draft: ${meetingTopic}`,
       badgeText: "Draft ready",
       isDraftReady: true,
       payload: {
         recipientName: clientName,
-        recipientEmail: `${clientName.toLowerCase().replace(/\s+/g, ".")}@${companyName.toLowerCase().replace(/[^a-z0-9]/g, "")}.com`,
-        subject: `Recap: ${dealStage} & Demo Details for ${meetingDay} at ${meetingTime}`,
-        body: `Hi ${clientName.split(" ")[0]},
-
-Great speaking with you today! I'm thrilled with our discussion regarding ${dealStage.toLowerCase()}.
-
-As agreed, I have scheduled our live product walkthrough demo for this ${meetingDay} at ${meetingTime}. 
-
-I will have our updated ${deliverable} in your inbox ${deliverableDue}. In the meantime, our team is preparing the formal contract so we can ensure everything runs smoothly.
-
-Looking forward to our sync on ${meetingDay}!
-
-Best regards,
-Anurag Sharma`,
+        recipientEmail: recipientEmail,
+        subject: emailSubject,
+        body: emailBody,
       },
     },
     {
       id: "act-calendar",
       type: "calendar",
       icon: "calendar",
-      title: `Demo with ${clientName}`,
+      title: `Meeting with ${clientName}`,
       subtitle: `Calendar event, ${meetingDay} at ${meetingTime}`,
       badgeText: "Ready",
       payload: {
-        title: `${companyName} Product Demo — ${clientName}`,
+        title: `${meetingTopic} — ${clientName}`,
         day: meetingDay,
         time: meetingTime,
         isoTime: meetingIsoTime,
         durationMinutes: 45,
         location: "Google Meet",
-        attendees: [
-          `${clientName.toLowerCase().replace(/\s+/g, ".")}@${companyName.toLowerCase().replace(/[^a-z0-9]/g, "")}.com`,
-          "you@startup.com",
-        ],
-        description: `Follow-up product demonstration and technical architecture review following ${dealStage.toLowerCase()}.`,
+        attendees: [recipientEmail, "you@domain.com"],
+        description: `Follow-up on ${meetingTopic}.\nDecisions: ${dealStage}.\nDeliverable: ${deliverable} due ${deliverableDue}.`,
       },
     },
     {
       id: "act-notes",
       type: "notes",
       icon: "file",
-      title: `Call notes: ${dealStage.toLowerCase()}`,
-      subtitle: `Notion page with the full summary`,
+      title: `Call notes: ${meetingTopic}`,
+      subtitle: `Notion page with summary & decisions`,
       badgeText: "Ready",
       payload: {
-        title: `${clientName} (${companyName}) — Post-Call Debrief`,
+        title: `${clientName} (${companyName}) — ${meetingTopic}`,
         dealStage,
-        summary: `Call concluded with ${clientName}. Key milestone ratified: ${dealStage}. Scheduled next session for ${meetingDay} at ${meetingTime}. Deliverable (${deliverable}) committed for ${deliverableDue}.`,
+        summary: `Call concluded with ${clientName}. Discussed ${meetingTopic}. Next sync locked for ${meetingDay} at ${meetingTime}. Key deliverable (${deliverable}) committed for ${deliverableDue}.`,
         keyPoints: [
-          `${dealStage} confirmed with client.`,
-          `Demo booked for ${meetingDay} at ${meetingTime}.`,
-          `Internal handoff assigned to ${colleague}: ${colleagueTask}.`,
+          `Key Topic: ${meetingTopic}.`,
+          `Status / Milestone: ${dealStage}.`,
+          `Next session scheduled for ${meetingDay} at ${meetingTime}.`,
+          `Internal delegation: ${colleague} assigned to ${colleagueTask}.`,
         ],
       },
     },
@@ -217,15 +247,15 @@ Anurag Sharma`,
       id: "act-crm",
       type: "crm",
       icon: "users",
-      title: `Move ${clientName} to ${dealStage}`,
-      subtitle: `CRM deal stage and last-contact date`,
+      title: `Update status: ${dealStage}`,
+      subtitle: `Pipeline stage & last-contact timestamp`,
       badgeText: "Ready",
       payload: {
         clientName,
         companyName,
         dealStage,
-        dealValue: "$36,000 / year",
-        nextMilestone: `Demo on ${meetingDay} at ${meetingTime}`,
+        dealValue: "$24,000 / year",
+        nextMilestone: `Follow-up on ${meetingDay} at ${meetingTime}`,
       },
     },
     {
@@ -233,13 +263,14 @@ Anurag Sharma`,
       type: "task",
       icon: "check",
       title: `${colleague}: ${colleagueTask}`,
-      subtitle: `Task assigned to ${colleague}`,
+      subtitle: `Task assigned to ${lookupTeammateHandle(colleague)}`,
       badgeText: "Ready",
       payload: {
         assignee: colleague,
+        slackHandle: lookupTeammateHandle(colleague),
         task: colleagueTask,
         dueDate: deliverableDue,
-        slackMessage: `Hey ${colleague}! Just wrapped up with ${clientName} from ${companyName} (${dealStage.toLowerCase()}). Could you please ${colleagueTask} so we can follow up right after our ${meetingDay} demo? Thanks!`,
+        slackMessage: `Hey ${colleague}! Just wrapped up the sync with ${clientName} regarding ${meetingTopic}. Could you please ${colleagueTask} so we have it ready ahead of our ${meetingDay} meeting? Thanks!`,
       },
     },
   ];
@@ -255,10 +286,45 @@ Anurag Sharma`,
 }
 
 /**
- * Builds annotated inline segments with purple highlights and tiny category badges
+ * Generates an articulate, contextual email body directly reflecting the user's specific post-call discussion
+ */
+function generateContextualEmailBody(ctx: {
+  clientName: string;
+  companyName: string;
+  meetingTopic: string;
+  meetingDay: string;
+  meetingTime: string;
+  deliverable: string;
+  deliverableDue: string;
+  colleague: string;
+  colleagueTask: string;
+  dealStage: string;
+  rawText: string;
+}): string {
+  const firstName = ctx.clientName.split(" ")[0];
+
+  return `Hi ${firstName},
+
+Great catching up with you today regarding ${ctx.meetingTopic}!
+
+To summarize what we agreed on:
+• Milestone / Status: ${ctx.dealStage}
+• Deliverable: I'll make sure our ${ctx.deliverable} is shared with you ${ctx.deliverableDue}.
+• Next Step: I've blocked time on our calendars for ${ctx.meetingDay} at ${ctx.meetingTime} for our follow-up demo and review.
+
+In the meantime, ${ctx.colleague} is already working on ${ctx.colleagueTask} so everything is aligned and ready to roll.
+
+Please let me know if there's anything else you'd like us to include before our next sync.
+
+Best regards,
+Anurag Sharma`;
+}
+
+/**
+ * Builds annotated inline segments with purple highlights and destination badges
  */
 function buildAnnotatedSegments(text: string, data: any): AnnotatedSegment[] {
-  // If text exactly matches default Sarah prompt, provide pixel-perfect matching segmentation
+  // Sarah prompt baseline
   if (text.toLowerCase().includes("sarah") && text.toLowerCase().includes("pricing")) {
     return [
       { id: "s1", text: "Just got off the call with ", isEntity: false },
@@ -275,114 +341,90 @@ function buildAnnotatedSegments(text: string, data: any): AnnotatedSegment[] {
     ];
   }
 
-  // Dynamic segmentation for ANY custom text
+  // Dynamic segmentation for ANY custom text (e.g. Anuj, Anurag, etc.)
+  const words = text.split(" ");
   const segments: AnnotatedSegment[] = [];
-  let remaining = text;
-  let counter = 1;
+  let buffer: string[] = [];
 
-  // We find candidate matches
-  const entities: { start: number; end: number; text: string; entityType: any; badge: any }[] = [];
+  for (let i = 0; i < words.length; i++) {
+    const word = words[i];
+    const cleanWord = word.replace(/[^a-zA-Z0-9@.]/g, "");
 
-  // Match person
-  const pMatch = remaining.match(new RegExp(`\\b${data.clientName}\\b`, "i"));
-  if (pMatch && pMatch.index !== undefined) {
-    entities.push({
-      start: pMatch.index,
-      end: pMatch.index + pMatch[0].length,
-      text: pMatch[0],
-      entityType: "person",
-      badge: null,
-    });
-  }
-
-  // Match calendar
-  const cMatch = remaining.match(/(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday|tomorrow|next week)?\s*(?:at\s*)?\d{1,2}(?::\d{2})?\s*(?:AM|PM|am|pm)?/i);
-  if (cMatch && cMatch.index !== undefined && cMatch[0].trim().length > 3) {
-    entities.push({
-      start: cMatch.index,
-      end: cMatch.index + cMatch[0].length,
-      text: cMatch[0],
-      entityType: "calendar",
-      badge: "Calendar",
-    });
-  }
-
-  // Match CRM stage
-  const crmMatch = remaining.match(/(approved the pricing|pricing approved|agreed to the pilot|pilot agreed|signed the contract|approved the proposal|signed off)/i);
-  if (crmMatch && crmMatch.index !== undefined) {
-    entities.push({
-      start: crmMatch.index,
-      end: crmMatch.index + crmMatch[0].length,
-      text: crmMatch[0],
-      entityType: "crm",
-      badge: "CRM",
-    });
-  }
-
-  // Match email / document
-  const eMatch = remaining.match(/(?:proposal|pdf|deck|contract|documentation|pricing document|spec)(?:\s+by\s+[^,.]+)?/i);
-  if (eMatch && eMatch.index !== undefined) {
-    entities.push({
-      start: eMatch.index,
-      end: eMatch.index + eMatch[0].length,
-      text: eMatch[0],
-      entityType: "email",
-      badge: "Gmail",
-    });
-  }
-
-  // Match task delegation
-  const tMatch = remaining.match(/(?:remind|tell|ask|have)\s+[A-Za-z]+\s+to\s+[^,.]+/i);
-  if (tMatch && tMatch.index !== undefined) {
-    entities.push({
-      start: tMatch.index,
-      end: tMatch.index + tMatch[0].length,
-      text: tMatch[0],
-      entityType: "task",
-      badge: "Tasks",
-    });
-  }
-
-  // Sort by index and deduplicate overlaps
-  entities.sort((a, b) => a.start - b.start);
-  const nonOverlapping: typeof entities = [];
-  let lastEnd = 0;
-
-  for (const ent of entities) {
-    if (ent.start >= lastEnd) {
-      nonOverlapping.push(ent);
-      lastEnd = ent.end;
-    }
-  }
-
-  let cursor = 0;
-  for (const ent of nonOverlapping) {
-    if (ent.start > cursor) {
+    if (cleanWord.toLowerCase() === data.clientName.toLowerCase() || cleanWord.includes("@")) {
+      if (buffer.length) {
+        segments.push({ id: `seg-${segments.length}`, text: buffer.join(" ") + " ", isEntity: false });
+        buffer = [];
+      }
       segments.push({
-        id: `seg-${counter++}`,
-        text: text.substring(cursor, ent.start),
-        isEntity: false,
+        id: `seg-${segments.length}`,
+        text: word + " ",
+        isEntity: true,
+        entityType: "person",
+        badge: cleanWord.includes("@") ? "Gmail" : null,
       });
+    } else if (
+      word.toLowerCase().includes("friday") ||
+      word.toLowerCase().includes("monday") ||
+      word.toLowerCase().includes("tuesday") ||
+      word.toLowerCase().includes("wednesday") ||
+      word.toLowerCase().includes("thursday") ||
+      /\d{1,2}(?::\d{2})?\s*(?:am|pm)?/i.test(word)
+    ) {
+      if (buffer.length) {
+        segments.push({ id: `seg-${segments.length}`, text: buffer.join(" ") + " ", isEntity: false });
+        buffer = [];
+      }
+      segments.push({
+        id: `seg-${segments.length}`,
+        text: word + " ",
+        isEntity: true,
+        entityType: "calendar",
+        badge: "Calendar",
+      });
+    } else if (
+      word.toLowerCase().includes("email") ||
+      word.toLowerCase().includes("proposal") ||
+      word.toLowerCase().includes("prototype") ||
+      word.toLowerCase().includes("figma") ||
+      word.toLowerCase().includes("pdf")
+    ) {
+      if (buffer.length) {
+        segments.push({ id: `seg-${segments.length}`, text: buffer.join(" ") + " ", isEntity: false });
+        buffer = [];
+      }
+      segments.push({
+        id: `seg-${segments.length}`,
+        text: word + " ",
+        isEntity: true,
+        entityType: "email",
+        badge: "Gmail",
+      });
+    } else if (
+      cleanWord.toLowerCase() === data.colleague.toLowerCase() ||
+      word.toLowerCase().includes("remind") ||
+      word.toLowerCase().includes("task")
+    ) {
+      if (buffer.length) {
+        segments.push({ id: `seg-${segments.length}`, text: buffer.join(" ") + " ", isEntity: false });
+        buffer = [];
+      }
+      segments.push({
+        id: `seg-${segments.length}`,
+        text: word + " ",
+        isEntity: true,
+        entityType: "task",
+        badge: "Tasks",
+      });
+    } else {
+      buffer.push(word);
     }
-    segments.push({
-      id: `seg-${counter++}`,
-      text: text.substring(ent.start, ent.end),
-      isEntity: true,
-      entityType: ent.entityType,
-      badge: ent.badge,
-    });
-    cursor = ent.end;
   }
 
-  if (cursor < text.length) {
-    segments.push({
-      id: `seg-${counter++}`,
-      text: text.substring(cursor),
-      isEntity: false,
-    });
+  if (buffer.length) {
+    segments.push({ id: `seg-${segments.length}`, text: buffer.join(" "), isEntity: false });
   }
 
-  return segments.length ? segments : [{ id: "seg-default", text: text, isEntity: false }];
+  return segments;
 }
 
 function getEmptyState(): ParsedDebriefState {
@@ -390,7 +432,7 @@ function getEmptyState(): ParsedDebriefState {
     rawText: "",
     durationSeconds: 0,
     clientName: "Partner",
-    companyName: "Client",
+    companyName: "Organization",
     annotatedSegments: [],
     actions: [],
   };

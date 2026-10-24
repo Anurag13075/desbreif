@@ -1,8 +1,9 @@
 "use client";
 
 import React, { useState } from "react";
-import { X, Save, Edit3 } from "lucide-react";
+import { X, Save, Edit3, Mail, Calendar, FileText, Users, CheckSquare } from "lucide-react";
 import { StagedAction } from "@/lib/universalEntityEngine";
+import { saveContact } from "@/lib/contacts";
 
 interface ActionEditorModalProps {
   isOpen: boolean;
@@ -33,8 +34,30 @@ export const ActionEditorModal: React.FC<ActionEditorModalProps> = ({
     );
   };
 
+  const handlePayloadChange = (id: string, field: string, val: any) => {
+    setEditedActions((prev) =>
+      prev.map((act) => {
+        if (act.id === id) {
+          return {
+            ...act,
+            payload: {
+              ...act.payload,
+              [field]: val,
+            },
+          };
+        }
+        return act;
+      })
+    );
+  };
+
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
+    // Save contact email if email action exists
+    const emailAction = editedActions.find((a) => a.type === "email");
+    if (emailAction?.payload?.recipientName && emailAction?.payload?.recipientEmail) {
+      saveContact(emailAction.payload.recipientName, emailAction.payload.recipientEmail);
+    }
     onSaveActions(editedActions);
     onClose();
   };
@@ -51,10 +74,10 @@ export const ActionEditorModal: React.FC<ActionEditorModalProps> = ({
             </div>
             <div>
               <h3 className="font-bold text-base text-[#111827]">
-                Edit Staged Actions
+                Edit Destination Details & Message Copy
               </h3>
               <p className="text-xs text-[#6B7280]">
-                Customize recipient, meeting times, or delegations before syncing
+                Customize recipient email, meeting times, and teammate delegation before syncing
               </p>
             </div>
           </div>
@@ -69,16 +92,19 @@ export const ActionEditorModal: React.FC<ActionEditorModalProps> = ({
 
         {/* Form fields */}
         <form onSubmit={handleSave} className="space-y-4">
-          <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-1">
+          <div className="space-y-3.5 max-h-[60vh] overflow-y-auto pr-1">
             {editedActions.map((act, idx) => (
-              <div key={act.id} className="p-3.5 rounded-2xl bg-[#F9FAFB] border border-[#E5E7EB] space-y-2">
-                <span className="text-[11px] font-bold text-[#3B4BF8] uppercase tracking-wider block">
-                  Action {idx + 1}: {act.type.toUpperCase()}
-                </span>
+              <div key={act.id} className="p-3.5 rounded-2xl bg-[#F9FAFB] border border-[#E5E7EB] space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold text-[#3B4BF8] uppercase tracking-wider block">
+                    Action {idx + 1}: {act.type.toUpperCase()}
+                  </span>
+                  <span className="text-[10px] text-[#6B7280] font-medium">{act.subtitle}</span>
+                </div>
 
                 <div>
                   <label className="text-[11px] font-semibold text-[#374151] block mb-1">
-                    Action Title
+                    Display Title
                   </label>
                   <input
                     type="text"
@@ -88,17 +114,64 @@ export const ActionEditorModal: React.FC<ActionEditorModalProps> = ({
                   />
                 </div>
 
-                <div>
-                  <label className="text-[11px] font-semibold text-[#374151] block mb-1">
-                    Details / Timing
-                  </label>
-                  <input
-                    type="text"
-                    value={act.subtitle}
-                    onChange={(e) => handleSubtitleChange(act.id, e.target.value)}
-                    className="w-full px-3 py-1.5 rounded-lg bg-white border border-[#D1D5DB] text-xs text-[#4B5563] focus:outline-none focus:border-[#3B4BF8]"
-                  />
-                </div>
+                {/* Email specific field edits */}
+                {act.type === "email" && act.payload && (
+                  <div className="space-y-2 pt-1 border-t border-[#E5E7EB]">
+                    <div>
+                      <label className="text-[11px] font-semibold text-[#374151] block mb-1">
+                        Recipient Real Email Address
+                      </label>
+                      <input
+                        type="email"
+                        value={act.payload.recipientEmail || ""}
+                        onChange={(e) => handlePayloadChange(act.id, "recipientEmail", e.target.value)}
+                        placeholder="e.g. anuj@gmail.com, anurag@outlook.com"
+                        className="w-full px-3 py-1.5 rounded-lg bg-white border border-[#D1D5DB] text-xs text-[#111827] focus:outline-none focus:border-[#3B4BF8]"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-[11px] font-semibold text-[#374151] block mb-1">
+                        Email Subject
+                      </label>
+                      <input
+                        type="text"
+                        value={act.payload.subject || ""}
+                        onChange={(e) => handlePayloadChange(act.id, "subject", e.target.value)}
+                        className="w-full px-3 py-1.5 rounded-lg bg-white border border-[#D1D5DB] text-xs text-[#111827] focus:outline-none focus:border-[#3B4BF8]"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-[11px] font-semibold text-[#374151] block mb-1">
+                        Email Body
+                      </label>
+                      <textarea
+                        rows={4}
+                        value={act.payload.body || ""}
+                        onChange={(e) => handlePayloadChange(act.id, "body", e.target.value)}
+                        className="w-full px-3 py-1.5 rounded-lg bg-white border border-[#D1D5DB] text-xs text-[#111827] font-sans focus:outline-none focus:border-[#3B4BF8]"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* Task/Slack specific field edits */}
+                {act.type === "task" && act.payload && (
+                  <div className="space-y-2 pt-1 border-t border-[#E5E7EB]">
+                    <div>
+                      <label className="text-[11px] font-semibold text-[#374151] block mb-1">
+                        Slack / Ping Message
+                      </label>
+                      <textarea
+                        rows={3}
+                        value={act.payload.slackMessage || ""}
+                        onChange={(e) => handlePayloadChange(act.id, "slackMessage", e.target.value)}
+                        className="w-full px-3 py-1.5 rounded-lg bg-white border border-[#D1D5DB] text-xs text-[#111827] font-mono focus:outline-none focus:border-[#3B4BF8]"
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -117,7 +190,7 @@ export const ActionEditorModal: React.FC<ActionEditorModalProps> = ({
               className="px-5 py-2.5 rounded-xl bg-[#3B4BF8] hover:bg-[#2B3BE5] text-white text-xs font-semibold shadow-sm flex items-center space-x-1.5"
             >
               <Save className="w-3.5 h-3.5" />
-              <span>Save Changes</span>
+              <span>Save & Apply</span>
             </button>
           </div>
         </form>

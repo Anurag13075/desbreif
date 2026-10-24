@@ -13,6 +13,7 @@ import {
   Edit2,
   Check,
   CheckCircle2,
+  Loader2,
 } from "lucide-react";
 import { ParsedDebriefState, StagedAction, AnnotatedSegment } from "@/lib/universalEntityEngine";
 
@@ -21,7 +22,9 @@ interface DebriefStudioProps {
   onChangeTranscript: (text: string) => void;
   onApproveAndSync: () => void;
   onEditActions: () => void;
+  onTriggerAIGeneration?: () => void;
   isProcessing: boolean;
+  isGroqConnected?: boolean;
 }
 
 export const DebriefStudio: React.FC<DebriefStudioProps> = ({
@@ -29,7 +32,9 @@ export const DebriefStudio: React.FC<DebriefStudioProps> = ({
   onChangeTranscript,
   onApproveAndSync,
   onEditActions,
+  onTriggerAIGeneration,
   isProcessing,
+  isGroqConnected,
 }) => {
   const [isRecording, setIsRecording] = useState(false);
   const [isEditingRaw, setIsEditingRaw] = useState(false);
@@ -87,9 +92,9 @@ export const DebriefStudio: React.FC<DebriefStudioProps> = ({
   const getActionIcon = (iconType: string) => {
     switch (iconType) {
       case "mail":
-        return <Mail className="w-4 h-4 text-[#4B5563]" />;
+        return <Mail className="w-4 h-4 text-[#3B4BF8]" />;
       case "calendar":
-        return <Calendar className="w-4 h-4 text-[#4B5563]" />;
+        return <Calendar className="w-4 h-4 text-[#3B4BF8]" />;
       case "file":
         return <FileText className="w-4 h-4 text-[#4B5563]" />;
       case "users":
@@ -108,7 +113,7 @@ export const DebriefStudio: React.FC<DebriefStudioProps> = ({
           Hang up the call. Everything else is done.
         </h1>
         <p className="text-[15px] text-[#4B5563] leading-relaxed font-normal">
-          Speak for 20 seconds after a client call. Debrief drafts your email, books the follow-up, writes the notes and updates your CRM for you to approve.
+          Speak for 20 seconds after a call with Anuj, Sarah, or any client. Debrief drafts your email, books the follow-up, writes the notes and updates your CRM for you to approve.
         </p>
       </div>
 
@@ -120,7 +125,26 @@ export const DebriefStudio: React.FC<DebriefStudioProps> = ({
           
           {/* Header */}
           <div className="flex items-center justify-between text-sm">
-            <span className="font-bold text-[#111827]">Your debrief</span>
+            <div className="flex items-center space-x-2">
+              <span className="font-bold text-[#111827]">Your debrief</span>
+              {onTriggerAIGeneration && (
+                <button
+                  type="button"
+                  onClick={onTriggerAIGeneration}
+                  disabled={isProcessing}
+                  className="px-2.5 py-0.5 rounded-full bg-[#EEF0FF] hover:bg-[#E0E4FF] text-[#3B4BF8] text-[11px] font-semibold flex items-center space-x-1 transition-all"
+                  title="Ask AI to write custom email and actions for your prompt"
+                >
+                  {isProcessing ? (
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                  ) : (
+                    <Sparkles className="w-3 h-3" />
+                  )}
+                  <span>{isProcessing ? "AI Writing..." : "AI Generate Actions"}</span>
+                </button>
+              )}
+            </div>
+
             <div className="flex items-center space-x-2">
               <button
                 onClick={() => setIsEditingRaw(!isEditingRaw)}
@@ -132,7 +156,7 @@ export const DebriefStudio: React.FC<DebriefStudioProps> = ({
               </button>
               <span className="text-[#9CA3AF]">•</span>
               <span className="text-[#9CA3AF] text-xs font-medium">
-                {state.durationSeconds || 16} seconds spoken
+                {state.durationSeconds || 16}s spoken
               </span>
             </div>
           </div>
@@ -140,16 +164,21 @@ export const DebriefStudio: React.FC<DebriefStudioProps> = ({
           {/* Interactive Text with Inline Highlight Entity Badges */}
           <div className="flex-1 py-2">
             {isEditingRaw ? (
-              <textarea
-                rows={6}
-                value={rawInputText}
-                onChange={(e) => {
-                  setRawInputText(e.target.value);
-                  onChangeTranscript(e.target.value);
-                }}
-                className="w-full text-lg leading-relaxed text-[#1F2937] p-3 rounded-xl border border-[#D1D5DB] focus:outline-none focus:border-[#3B4BF8]"
-                placeholder="Speak or type your casual 20-second post-call ramble..."
-              />
+              <div className="space-y-2">
+                <textarea
+                  rows={6}
+                  value={rawInputText}
+                  onChange={(e) => {
+                    setRawInputText(e.target.value);
+                    onChangeTranscript(e.target.value);
+                  }}
+                  className="w-full text-base sm:text-lg leading-relaxed text-[#1F2937] p-3 rounded-xl border border-[#D1D5DB] focus:outline-none focus:border-[#3B4BF8]"
+                  placeholder="Speak or type: 'Write an email for Anuj considering our meeting about design engineering for our product, we agreed on X...'"
+                />
+                <p className="text-[11px] text-[#6B7280]">
+                  💡 Tip: You can say real emails (e.g. <code>anuj@gmail.com</code>) or any friend's name and topic!
+                </p>
+              </div>
             ) : (
               <div className="text-[18px] sm:text-[19px] leading-[1.85] text-[#1F2937] font-normal selection:bg-[#EEF0FF]">
                 {state.annotatedSegments.map((seg) => {
@@ -233,9 +262,14 @@ export const DebriefStudio: React.FC<DebriefStudioProps> = ({
           
           {/* Header */}
           <div className="flex items-center justify-between text-sm">
-            <span className="font-bold text-[#111827]">
-              {state.actions.length} actions ready
-            </span>
+            <div className="flex items-center space-x-2">
+              <span className="font-bold text-[#111827]">
+                {state.actions.length} actions ready
+              </span>
+              <span className="text-[10px] font-semibold text-[#059669] bg-[#ECFDF5] px-2 py-0.5 rounded-full">
+                Real Addresses
+              </span>
+            </div>
             <span className="text-[#9CA3AF] text-xs">
               Nothing is sent until you approve
             </span>
@@ -288,7 +322,7 @@ export const DebriefStudio: React.FC<DebriefStudioProps> = ({
               onClick={onEditActions}
               className="px-4 py-2.5 rounded-xl bg-white border border-[#E5E7EB] hover:border-[#9CA3AF] text-[#111827] text-xs font-semibold shadow-2xs transition-all"
             >
-              Edit actions
+              Edit destinations & text
             </button>
 
             {/* Approve and sync 5 actions (Vibrant royal blue button) */}

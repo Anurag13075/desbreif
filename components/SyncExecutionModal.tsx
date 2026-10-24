@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   X,
   CheckCircle2,
@@ -15,10 +15,14 @@ import {
   Download,
   Send,
   Sparkles,
+  Edit2,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 import { StagedAction } from "@/lib/universalEntityEngine";
 import { generateGmailWebUrl, generateMailtoUrl } from "@/lib/emailExport";
 import { generateGoogleCalendarUrl, downloadIcsFile } from "@/lib/calendarExport";
+import { saveContact } from "@/lib/contacts";
 
 interface SyncExecutionModalProps {
   isOpen: boolean;
@@ -34,18 +38,44 @@ export const SyncExecutionModal: React.FC<SyncExecutionModalProps> = ({
   clientName,
 }) => {
   const [copiedApp, setCopiedApp] = useState<string | null>(null);
+  const [showEmailPreview, setShowEmailPreview] = useState(false);
 
-  if (!isOpen) return null;
-
+  // Editable fields for real destination addresses
   const emailAction = actions.find((a) => a.type === "email");
   const calendarAction = actions.find((a) => a.type === "calendar");
   const notesAction = actions.find((a) => a.type === "notes");
   const crmAction = actions.find((a) => a.type === "crm");
   const taskAction = actions.find((a) => a.type === "task");
 
-  const gmailUrl = emailAction ? generateGmailWebUrl(emailAction.payload) : "#";
-  const mailtoUrl = emailAction ? generateMailtoUrl(emailAction.payload) : "#";
-  const gcalUrl = calendarAction
+  const [realEmail, setRealEmail] = useState("");
+  const [emailSubject, setEmailSubject] = useState("");
+  const [emailBody, setEmailBody] = useState("");
+  const [slackMessage, setSlackMessage] = useState("");
+
+  useEffect(() => {
+    if (emailAction?.payload) {
+      setRealEmail(emailAction.payload.recipientEmail || "anuj@gmail.com");
+      setEmailSubject(emailAction.payload.subject || "");
+      setEmailBody(emailAction.payload.body || "");
+    }
+    if (taskAction?.payload) {
+      setSlackMessage(taskAction.payload.slackMessage || "");
+    }
+  }, [emailAction, taskAction]);
+
+  if (!isOpen) return null;
+
+  const currentEmailPayload = {
+    recipientName: clientName,
+    recipientEmail: realEmail,
+    subject: emailSubject,
+    body: emailBody,
+  };
+
+  const dynamicGmailUrl = generateGmailWebUrl(currentEmailPayload);
+  const dynamicMailtoUrl = generateMailtoUrl(currentEmailPayload);
+
+  const dynamicGcalUrl = calendarAction
     ? generateGoogleCalendarUrl({
         title: calendarAction.payload.title,
         startDate: calendarAction.payload.day,
@@ -53,10 +83,16 @@ export const SyncExecutionModal: React.FC<SyncExecutionModalProps> = ({
         endTime: "15:45",
         durationMinutes: 45,
         location: "Google Meet",
-        attendees: calendarAction.payload.attendees || [],
+        attendees: [realEmail, "you@domain.com"],
         description: calendarAction.payload.description,
       })
     : "#";
+
+  const handleEmailBlur = () => {
+    if (realEmail && realEmail.includes("@")) {
+      saveContact(clientName, realEmail);
+    }
+  };
 
   const handleCopyNotion = () => {
     if (!notesAction) return;
@@ -67,8 +103,7 @@ export const SyncExecutionModal: React.FC<SyncExecutionModalProps> = ({
   };
 
   const handleCopySlack = () => {
-    if (!taskAction) return;
-    navigator.clipboard.writeText(taskAction.payload.slackMessage);
+    navigator.clipboard.writeText(slackMessage);
     setCopiedApp("slack");
     setTimeout(() => setCopiedApp(null), 2000);
   };
@@ -82,14 +117,14 @@ export const SyncExecutionModal: React.FC<SyncExecutionModalProps> = ({
       endTime: "15:45",
       durationMinutes: 45,
       location: "Google Meet",
-      attendees: calendarAction.payload.attendees || [],
+      attendees: [realEmail, "you@domain.com"],
       description: calendarAction.payload.description,
     });
   };
 
   const handleOpenAllTabs = () => {
-    if (gmailUrl && gmailUrl !== "#") window.open(gmailUrl, "_blank");
-    if (gcalUrl && gcalUrl !== "#") window.open(gcalUrl, "_blank");
+    if (dynamicGmailUrl && dynamicGmailUrl !== "#") window.open(dynamicGmailUrl, "_blank");
+    if (dynamicGcalUrl && dynamicGcalUrl !== "#") window.open(dynamicGcalUrl, "_blank");
     handleCopyNotion();
   };
 
@@ -108,7 +143,7 @@ export const SyncExecutionModal: React.FC<SyncExecutionModalProps> = ({
                 Synchronizing 5 Live Apps
               </h3>
               <p className="text-xs text-[#6B7280]">
-                All operational artifacts ready for {clientName}
+                Ready to deliver to real addresses for {clientName}
               </p>
             </div>
           </div>
@@ -128,7 +163,7 @@ export const SyncExecutionModal: React.FC<SyncExecutionModalProps> = ({
               1-Click Multi-App Auto-Pilot
             </span>
             <span className="text-xs text-[#4B5563]">
-              Instantly opens Gmail compose + Google Calendar tabs and copies Notion notes
+              Instantly opens Gmail compose + Google Calendar tabs with real recipients
             </span>
           </div>
 
@@ -144,7 +179,7 @@ export const SyncExecutionModal: React.FC<SyncExecutionModalProps> = ({
         {/* Staged Apps Details List */}
         <div className="space-y-4">
           
-          {/* App 1: Gmail Draft */}
+          {/* App 1: Gmail Draft with REAL editable address and live email */}
           {emailAction && (
             <div className="p-4 rounded-2xl bg-[#F9FAFB] border border-[#E5E7EB] space-y-3">
               <div className="flex items-center justify-between">
@@ -152,36 +187,72 @@ export const SyncExecutionModal: React.FC<SyncExecutionModalProps> = ({
                   <Mail className="w-4 h-4 text-[#3B4BF8]" />
                   <span>1. Gmail Follow-Up Draft</span>
                 </div>
-                <span className="text-[11px] text-[#059669] font-semibold bg-[#ECFDF5] px-2 py-0.5 rounded-full">
-                  Draft Prepared
-                </span>
+                <button
+                  type="button"
+                  onClick={() => setShowEmailPreview(!showEmailPreview)}
+                  className="text-xs text-[#3B4BF8] hover:underline font-semibold flex items-center space-x-1"
+                >
+                  {showEmailPreview ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                  <span>{showEmailPreview ? "Hide Email Body" : "View & Edit Body"}</span>
+                </button>
               </div>
 
-              <div className="text-xs space-y-1 bg-white p-3 rounded-xl border border-[#E5E7EB]">
-                <p className="text-[#6B7280]">
-                  <strong className="text-[#111827]">To:</strong> {emailAction.payload.recipientName} ({emailAction.payload.recipientEmail})
-                </p>
-                <p className="text-[#6B7280]">
-                  <strong className="text-[#111827]">Subject:</strong> {emailAction.payload.subject}
-                </p>
+              {/* Editable Real Recipient Email */}
+              <div className="bg-white p-3 rounded-xl border border-[#E5E7EB] space-y-2">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                  <label className="font-semibold text-[#374151] whitespace-nowrap flex items-center space-x-1">
+                    <span>To (Real Email Address):</span>
+                  </label>
+                  <input
+                    type="email"
+                    value={realEmail}
+                    onChange={(e) => setRealEmail(e.target.value)}
+                    onBlur={handleEmailBlur}
+                    placeholder="e.g. anuj@gmail.com, friend@company.com"
+                    className="flex-1 px-3 py-1 rounded-lg border border-[#D1D5DB] focus:outline-none focus:border-[#3B4BF8] text-xs font-medium text-[#111827]"
+                  />
+                </div>
+
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+                  <label className="font-semibold text-[#374151] whitespace-nowrap">Subject:</label>
+                  <input
+                    type="text"
+                    value={emailSubject}
+                    onChange={(e) => setEmailSubject(e.target.value)}
+                    className="flex-1 px-3 py-1 rounded-lg border border-[#D1D5DB] focus:outline-none focus:border-[#3B4BF8] text-xs font-medium text-[#111827]"
+                  />
+                </div>
+
+                {/* Optional expanded body editor */}
+                {showEmailPreview && (
+                  <div className="pt-2 border-t border-[#F3F4F6] space-y-1">
+                    <label className="text-[11px] font-semibold text-[#6B7280]">AI-Written Email Body:</label>
+                    <textarea
+                      rows={6}
+                      value={emailBody}
+                      onChange={(e) => setEmailBody(e.target.value)}
+                      className="w-full p-2.5 rounded-lg border border-[#D1D5DB] text-xs text-[#374151] font-sans leading-relaxed focus:outline-none focus:border-[#3B4BF8]"
+                    />
+                  </div>
+                )}
               </div>
 
               <div className="flex items-center space-x-2 pt-1">
                 <a
-                  href={gmailUrl}
+                  href={dynamicGmailUrl}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="px-3 py-1.5 rounded-lg bg-[#3B4BF8] text-white text-xs font-semibold flex items-center space-x-1 hover:bg-[#2B3BE5]"
                 >
-                  <span>Open in Gmail</span>
+                  <span>Open in Gmail (Pre-filled)</span>
                   <ExternalLink className="w-3 h-3" />
                 </a>
 
                 <a
-                  href={mailtoUrl}
+                  href={dynamicMailtoUrl}
                   className="px-3 py-1.5 rounded-lg bg-white border border-[#D1D5DB] text-[#374151] text-xs font-semibold hover:bg-gray-50"
                 >
-                  <span>Default Mail</span>
+                  <span>Default Mail Client</span>
                 </a>
               </div>
             </div>
@@ -205,11 +276,14 @@ export const SyncExecutionModal: React.FC<SyncExecutionModalProps> = ({
                 <p className="text-[#6B7280]">
                   {calendarAction.payload.day} @ {calendarAction.payload.time} (45 min) • Google Meet
                 </p>
+                <p className="text-[11px] text-[#9CA3AF]">
+                  Invited: {realEmail} • you@domain.com
+                </p>
               </div>
 
               <div className="flex items-center space-x-2 pt-1">
                 <a
-                  href={gcalUrl}
+                  href={dynamicGcalUrl}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="px-3 py-1.5 rounded-lg bg-[#3B4BF8] text-white text-xs font-semibold flex items-center space-x-1 hover:bg-[#2B3BE5]"
@@ -223,7 +297,7 @@ export const SyncExecutionModal: React.FC<SyncExecutionModalProps> = ({
                   className="px-3 py-1.5 rounded-lg bg-white border border-[#D1D5DB] text-[#374151] text-xs font-semibold hover:bg-gray-50 flex items-center space-x-1"
                 >
                   <Download className="w-3 h-3" />
-                  <span>Download .ICS</span>
+                  <span>Download .ICS (Apple/Outlook)</span>
                 </button>
               </div>
             </div>
@@ -258,37 +332,45 @@ export const SyncExecutionModal: React.FC<SyncExecutionModalProps> = ({
               <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-2 text-xs font-bold text-[#111827]">
                   <Users className="w-4 h-4 text-[#3B4BF8]" />
-                  <span>4. CRM Deal Stage (HubSpot / Salesforce)</span>
+                  <span>4. CRM Deal Stage & Tracker</span>
                 </div>
-                <span className="text-[11px] font-bold text-[#3B4BF8] bg-[#EEF0FF] px-2.5 py-0.5 rounded-full">
-                  {crmAction.payload.dealStage}
+                <span className="text-[11px] text-[#059669] font-semibold bg-[#ECFDF5] px-2 py-0.5 rounded-full">
+                  Stage: {crmAction.payload.dealStage}
                 </span>
               </div>
-              <p className="text-xs text-[#6B7280]">
-                Deal value: <strong className="text-[#111827]">{crmAction.payload.dealValue}</strong> • Next Milestone: {crmAction.payload.nextMilestone}
-              </p>
+
+              <div className="text-xs text-[#6B7280] bg-white p-3 rounded-xl border border-[#E5E7EB] flex items-center justify-between">
+                <span>Client: <strong className="text-[#111827]">{crmAction.payload.clientName}</strong></span>
+                <span>Value: <strong className="text-[#111827]">{crmAction.payload.dealValue}</strong></span>
+                <span>Next: <strong className="text-[#111827]">{crmAction.payload.nextMilestone}</strong></span>
+              </div>
             </div>
           )}
 
-          {/* App 5: Colleague Task / Slack Handoff */}
+          {/* App 5: Colleague Task Delegation */}
           {taskAction && (
             <div className="p-4 rounded-2xl bg-[#F9FAFB] border border-[#E5E7EB] space-y-3">
               <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-2 text-xs font-bold text-[#111827]">
                   <CheckSquare className="w-4 h-4 text-[#3B4BF8]" />
-                  <span>5. Task & Slack Message for {taskAction.payload.assignee}</span>
+                  <span>5. Slack / Team Delegation ({taskAction.payload.assignee})</span>
                 </div>
                 <button
                   onClick={handleCopySlack}
                   className="px-2.5 py-1 rounded-lg bg-white border border-[#D1D5DB] text-xs font-semibold text-[#111827] hover:bg-gray-50 flex items-center space-x-1"
                 >
                   {copiedApp === "slack" ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
-                  <span>{copiedApp === "slack" ? "Copied!" : "Copy Slack"}</span>
+                  <span>{copiedApp === "slack" ? "Copied!" : "Copy Slack Ping"}</span>
                 </button>
               </div>
 
-              <div className="text-xs text-[#374151] bg-white p-3 rounded-xl border border-[#E5E7EB] font-mono">
-                {taskAction.payload.slackMessage}
+              <div className="bg-white p-3 rounded-xl border border-[#E5E7EB] space-y-1">
+                <textarea
+                  rows={2}
+                  value={slackMessage}
+                  onChange={(e) => setSlackMessage(e.target.value)}
+                  className="w-full text-xs text-[#374151] font-mono leading-relaxed p-1 border-0 focus:outline-none"
+                />
               </div>
             </div>
           )}
@@ -296,10 +378,10 @@ export const SyncExecutionModal: React.FC<SyncExecutionModalProps> = ({
         </div>
 
         {/* Footer */}
-        <div className="pt-2 flex justify-end">
+        <div className="pt-2 flex items-center justify-end border-t border-[#E5E7EB]">
           <button
             onClick={onClose}
-            className="px-5 py-2.5 rounded-xl bg-[#111827] hover:bg-black text-white text-xs font-bold shadow-sm"
+            className="px-5 py-2.5 rounded-xl bg-[#111827] hover:bg-black text-white text-xs font-semibold shadow-sm"
           >
             Done
           </button>

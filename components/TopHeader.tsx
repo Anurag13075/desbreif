@@ -38,6 +38,7 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
               onChange={(e) => onSelectSample(e.target.value)}
               className="appearance-none bg-white border border-[#E5E7EB] text-[#111827] text-xs font-semibold px-3 py-1.5 pr-8 rounded-lg focus:outline-none focus:border-[#3B4BF8] cursor-pointer shadow-sm hover:border-[#D1D5DB]"
             >
+              <option value="anuj">Anuj: design engineering review</option>
               <option value="sarah">Sarah Jenkins: pricing approved</option>
               <option value="marcus">Marcus Reed: security review</option>
               <option value="priya">Priya Nair: renewal negotiation</option>

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect } from "react";
 import { Sidebar } from "@/components/Sidebar";
 import { TopHeader } from "@/components/TopHeader";
 import { DebriefStudio } from "@/components/DebriefStudio";
@@ -18,25 +18,26 @@ import {
 import { PRESET_SCENARIOS, DEFAULT_DEBRIEF_RESULT } from "@/lib/presetScenarios";
 import { DebriefResult } from "@/lib/types";
 import { processDebriefVoiceRamble } from "@/lib/groqDebrief";
+import { getSavedContacts, saveContact } from "@/lib/contacts";
 import confetti from "canvas-confetti";
 
 export default function DebriefApp() {
   const [currentTab, setCurrentTab] = useState<"auto-pilot" | "call-vault" | "architecture" | "landing">("auto-pilot");
-  const [selectedSample, setSelectedSample] = useState<string>("sarah");
+  const [selectedSample, setSelectedSample] = useState<string>("anuj");
   
-  // Default spoken ramble text (matching the exact text from the demo prompt in Image 1)
+  // Default spoken ramble text showcasing Anuj and real design engineering discussion
   const [transcript, setTranscript] = useState<string>(
-    "Just got off the call with Sarah. She approved the pricing. We scheduled our next demo for Friday at 3:00 PM. I need to send her our proposal PDF by tomorrow noon, and remind Alex to prepare the contract."
+    "Write an email for Anuj at anuj@gmail.com, considering our meeting about design engineering for our product. We finalized the 3D model specs and approved the component hierarchy. Next review scheduled for Monday at 4:00 PM. I promised to send him the updated Figma prototype by tomorrow noon, and remind Anurag to test the API endpoints."
   );
 
   // Dynamic entity parsing state
   const [parsedDebrief, setParsedDebrief] = useState<ParsedDebriefState>(() =>
     parseUniversalVoiceRamble(
-      "Just got off the call with Sarah. She approved the pricing. We scheduled our next demo for Friday at 3:00 PM. I need to send her our proposal PDF by tomorrow noon, and remind Alex to prepare the contract."
+      "Write an email for Anuj at anuj@gmail.com, considering our meeting about design engineering for our product. We finalized the 3D model specs and approved the component hierarchy. Next review scheduled for Monday at 4:00 PM. I promised to send him the updated Figma prototype by tomorrow noon, and remind Anurag to test the API endpoints."
     )
   );
 
-  // Custom modified actions (if user edited via ActionEditorModal)
+  // Custom modified actions (if user edited via ActionEditorModal or AI synthesis)
   const [customActions, setCustomActions] = useState<StagedAction[] | null>(null);
 
   // Modals & State
@@ -79,18 +80,116 @@ export default function DebriefApp() {
     setCustomActions(null); // Reset manual overrides when transcript changes
   };
 
+  // AI Generation Trigger (calls Groq Llama 3.3 or deep generative engine)
+  const handleTriggerAIGeneration = async () => {
+    if (!transcript.trim() || isProcessing) return;
+    setIsProcessing(true);
+
+    try {
+      const { result, usedGroqAI } = await processDebriefVoiceRamble({
+        apiKey: groqApiKey,
+        model: selectedModel,
+        transcript: transcript,
+        speakerName: "Anurag Sharma",
+      });
+
+      // Save real contact
+      if (result.clientName && result.emailDraft.recipientEmail) {
+        saveContact(result.clientName, result.emailDraft.recipientEmail);
+      }
+
+      // Map AI generation into staged action cards
+      const updatedActions: StagedAction[] = [
+        {
+          id: "act-email",
+          type: "email",
+          icon: "mail",
+          title: `Email ${result.clientName.split(" ")[0]} (${result.emailDraft.recipientEmail})`,
+          subtitle: `Gmail draft: ${result.emailDraft.subject}`,
+          badgeText: "Draft ready",
+          isDraftReady: true,
+          payload: {
+            recipientName: result.clientName,
+            recipientEmail: result.emailDraft.recipientEmail,
+            subject: result.emailDraft.subject,
+            body: result.emailDraft.body,
+          },
+        },
+        {
+          id: "act-calendar",
+          type: "calendar",
+          icon: "calendar",
+          title: `Meeting with ${result.clientName}`,
+          subtitle: `Calendar event, ${result.calendarEvent.startDate} at ${result.calendarEvent.startTime}`,
+          badgeText: "Ready",
+          payload: {
+            title: result.calendarEvent.title,
+            day: result.calendarEvent.startDate,
+            time: result.calendarEvent.startTime,
+            isoTime: result.calendarEvent.startTime,
+            durationMinutes: result.calendarEvent.durationMinutes,
+            location: result.calendarEvent.location,
+            attendees: result.calendarEvent.attendees,
+            description: result.calendarEvent.description,
+          },
+        },
+        {
+          id: "act-notes",
+          type: "notes",
+          icon: "file",
+          title: `Call notes: ${result.clientName}`,
+          subtitle: `Notion page with summary & decisions`,
+          badgeText: "Ready",
+          payload: {
+            title: `${result.clientName} (${result.companyName}) — Post-Call Debrief`,
+            dealStage: result.crmUpdate.dealStage,
+            summary: result.executiveSummary,
+            keyPoints: result.keyDecisions,
+          },
+        },
+        {
+          id: "act-crm",
+          type: "crm",
+          icon: "users",
+          title: `Move ${result.clientName} to ${result.crmUpdate.dealStage}`,
+          subtitle: `CRM deal stage and last-contact date`,
+          badgeText: "Ready",
+          payload: result.crmUpdate,
+        },
+        {
+          id: "act-task",
+          type: "task",
+          icon: "check",
+          title: `${result.teamHandoff.targetPerson}: Action Item`,
+          subtitle: `Task assigned via Slack`,
+          badgeText: "Ready",
+          payload: {
+            assignee: result.teamHandoff.targetPerson,
+            slackMessage: result.teamHandoff.messageSnippet,
+          },
+        },
+      ];
+
+      setCustomActions(updatedActions);
+    } catch (err) {
+      console.error("AI Generation error:", err);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
   // Sample Call Selector
   const handleSelectSample = (sampleKey: string) => {
     setSelectedSample(sampleKey);
     let sampleText = "";
     switch (sampleKey) {
+      case "anuj":
+        sampleText =
+          "Write an email for Anuj at anuj@gmail.com, considering our meeting about design engineering for our product. We finalized the 3D model specs and approved the component hierarchy. Next review scheduled for Monday at 4:00 PM. I promised to send him the updated Figma prototype by tomorrow noon, and remind Anurag to test the API endpoints.";
+        break;
       case "sarah":
         sampleText =
-          "Just got off the call with Sarah. She approved the pricing. We scheduled our next demo for Friday at 3:00 PM. I need to send her our proposal PDF by tomorrow noon, and remind Alex to prepare the contract.";
-        break;
-      case "marcus":
-        sampleText =
-          "Quick huddle with Marcus on the PostgreSQL read-replica migration. Zero downtime strategy approved. We are doing the dry-run on staging this Saturday at 2 AM UTC. I promised to send him the rollback runbook by Friday 4 PM, and ping DevOps team to provision the additional RDS read instance.";
+          "Just got off the call with Sarah Jenkins at sarah.jenkins@acme.com. She approved the pricing. We scheduled our next demo for Friday at 3:00 PM. I need to send her our proposal PDF by tomorrow noon, and remind Alex to prepare the contract.";
         break;
       case "priya":
         sampleText =
@@ -100,9 +199,9 @@ export default function DebriefApp() {
         sampleText =
           "Wrapped up my sync with David Vance from Peak Horizon. Partner meeting went well, they want our updated cohort retention deck and ARR breakdown by Thursday evening. Let's schedule a 45-minute follow-up Q&A next Tuesday at 11 AM. Tell Rachel to pull the Stripe billing metrics tonight.";
         break;
-      case "rohan":
+      case "marcus":
         sampleText =
-          "Great discussion with Rohan at Flipkart. They approved our enterprise pilot for 500 agents. Follow up demo on Monday at 2:00 PM. Send him the security compliance checklist by tomorrow 5 PM, and ask Maya to configure the dedicated staging environment.";
+          "Quick huddle with Marcus on the PostgreSQL read-replica migration. Zero downtime strategy approved. We are doing the dry-run on staging this Saturday at 2 AM UTC. I promised to send him the rollback runbook by Friday 4 PM, and ping DevOps team to provision the additional RDS read instance.";
         break;
       default:
         sampleText = PRESET_SCENARIOS[0].rambleTranscript;
@@ -120,16 +219,15 @@ export default function DebriefApp() {
     } catch (e) {}
   };
 
-  // Current active actions to display & sync (either custom edited or dynamically parsed)
+  // Current active actions to display & sync
   const activeActions = customActions || parsedDebrief.actions;
 
-  // Active state combining parsed results with active actions
   const effectiveState: ParsedDebriefState = {
     ...parsedDebrief,
     actions: activeActions,
   };
 
-  // Approve and Sync button trigger
+  // Approve and Sync trigger
   const handleApproveAndSync = () => {
     confetti({
       particleCount: 60,
@@ -139,6 +237,9 @@ export default function DebriefApp() {
     });
 
     // Save to Call Vault
+    const emailAct = effectiveState.actions.find((a) => a.type === "email");
+    const recipientEmail = emailAct?.payload?.recipientEmail || "anuj@gmail.com";
+
     const newEntry: DebriefResult = {
       id: `debrief-${Date.now()}`,
       createdAt: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
@@ -146,7 +247,7 @@ export default function DebriefApp() {
       durationSeconds: parsedDebrief.durationSeconds,
       clientName: parsedDebrief.clientName,
       companyName: parsedDebrief.companyName,
-      executiveSummary: `Call concluded with ${parsedDebrief.clientName}. Actions staged and synchronized across Gmail, Google Calendar, Notion, and Slack.`,
+      executiveSummary: `Call concluded with ${parsedDebrief.clientName}. Actions staged and synchronized across Gmail (${recipientEmail}), Google Calendar, Notion, and Slack.`,
       keyDecisions: [
         `Ratified next steps with ${parsedDebrief.clientName}`,
         `Action items auto-assigned to internal team`,
@@ -154,18 +255,18 @@ export default function DebriefApp() {
       sentiment: "positive",
       emailDraft: {
         recipientName: parsedDebrief.clientName,
-        recipientEmail: `${parsedDebrief.clientName.toLowerCase().replace(/\s+/g, ".")}@${parsedDebrief.companyName.toLowerCase().replace(/[^a-z0-9]/g, "")}.com`,
-        subject: `Recap & Next Steps — ${parsedDebrief.clientName}`,
-        body: effectiveState.actions.find((a) => a.type === "email")?.payload?.body || "",
+        recipientEmail: recipientEmail,
+        subject: emailAct?.payload?.subject || `Recap — ${parsedDebrief.clientName}`,
+        body: emailAct?.payload?.body || "",
       },
       calendarEvent: {
-        title: `Demo with ${parsedDebrief.clientName}`,
-        startDate: "Friday",
-        startTime: "15:00",
-        endTime: "15:45",
+        title: `Meeting with ${parsedDebrief.clientName}`,
+        startDate: "Monday",
+        startTime: "16:00",
+        endTime: "16:45",
         durationMinutes: 45,
         location: "Google Meet",
-        attendees: [`${parsedDebrief.clientName.toLowerCase().replace(/\s+/g, ".")}@company.com`],
+        attendees: [recipientEmail, "you@domain.com"],
         description: `Follow up sync with ${parsedDebrief.clientName}`,
       },
       actionItems: effectiveState.actions.map((act) => ({
@@ -181,14 +282,14 @@ export default function DebriefApp() {
         clientName: parsedDebrief.clientName,
         companyName: parsedDebrief.companyName,
         dealStage: "Pricing Approved",
-        dealValue: "$36,000 / year",
+        dealValue: "$24,000 / year",
         sentiment: "positive",
-        keyDecision: "Pricing approved",
-        nextStepSummary: "Demo scheduled",
+        keyDecision: "Terms approved",
+        nextStepSummary: "Next review scheduled",
       },
       teamHandoff: {
-        targetPerson: "Alex",
-        role: "Legal & Operations",
+        targetPerson: "Anurag",
+        role: "Engineering",
         messageSnippet: effectiveState.actions.find((a) => a.type === "task")?.payload?.slackMessage || "",
       },
     };
@@ -212,7 +313,7 @@ export default function DebriefApp() {
         <div className="flex items-center space-x-2">
           <span className="w-2 h-2 rounded-full bg-[#10B981] animate-pulse"></span>
           <span className="font-semibold">Debrief</span>
-          <span className="text-gray-400">— The 30-Second Post-Call Auto-Pilot</span>
+          <span className="text-gray-400">— Real Post-Call Auto-Pilot (Wispr Flow #NoHandsChallenge)</span>
         </div>
         <div className="flex items-center space-x-3 text-xs">
           <button
@@ -270,7 +371,9 @@ export default function DebriefApp() {
                   onChangeTranscript={handleTranscriptChange}
                   onApproveAndSync={handleApproveAndSync}
                   onEditActions={() => setIsActionEditorOpen(true)}
+                  onTriggerAIGeneration={handleTriggerAIGeneration}
                   isProcessing={isProcessing}
+                  isGroqConnected={Boolean(groqApiKey && groqApiKey.trim().length > 0)}
                 />
               )}
 
